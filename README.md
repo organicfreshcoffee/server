@@ -174,12 +174,24 @@ All messages are JSON objects with the following structure:
 {
   "type": "connect",
   "data": {
-    "token": "firebase_jwt_token"
+    "token": "firebase_jwt_token",
+    "playerId": "optional_player_id",
+    "userEmail": "user@example.com",
+    "position": {
+      "x": 0,
+      "y": 0.5,
+      "z": 0
+    },
+    "rotation": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    }
   }
 }
 ```
 
-*Note: The server will verify this token by calling the configured auth server.*
+*Note: The server will verify this token by calling the configured auth server. Position and rotation are optional and will be used to set the player's initial spawn location.*
 
 #### Player Movement
 
@@ -191,10 +203,17 @@ All messages are JSON objects with the following structure:
       "x": 10.5,
       "y": 2.0,
       "z": -5.3
+    },
+    "rotation": {
+      "x": 0,
+      "y": 1.57,
+      "z": 0
     }
   }
 }
 ```
+
+*Note: Rotation is optional. Movement updates are rate-limited to 30 updates per second per player to prevent spam.*
 
 #### Player Actions
 
@@ -250,11 +269,56 @@ All messages are JSON objects with the following structure:
 
 ```json
 {
-  "type": "player_update",
+  "type": "player_moved",
   "data": {
     "playerId": "player_id",
     "position": { "x": 1, "y": 2, "z": 3 },
+    "rotation": { "x": 0, "y": 1.57, "z": 0 },
     "timestamp": "2023-01-01T00:00:00.000Z"
+  }
+}
+```
+
+*Note: Rotation field is included when the player's rotation data is available.*
+
+#### Player Joined
+
+```json
+{
+  "type": "player_joined",
+  "data": {
+    "id": "player_id",
+    "position": { "x": 0, "y": 0, "z": 0 },
+    "rotation": { "x": 0, "y": 0, "z": 0 },
+    "health": 100,
+    "maxHealth": 100,
+    "level": 1,
+    "experience": 0,
+    "isOnline": true,
+    "lastUpdate": "2023-01-01T00:00:00.000Z"
+  }
+}
+```
+
+#### Players List
+
+```json
+{
+  "type": "players_list",
+  "data": {
+    "players": [
+      {
+        "id": "player_id",
+        "position": { "x": 0, "y": 0, "z": 0 },
+        "rotation": { "x": 0, "y": 0, "z": 0 },
+        "health": 100,
+        "maxHealth": 100,
+        "level": 1,
+        "experience": 0,
+        "isOnline": true,
+        "lastUpdate": "2023-01-01T00:00:00.000Z"
+      }
+    ]
   }
 }
 ```

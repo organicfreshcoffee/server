@@ -13,11 +13,36 @@ const gameState: GameState = {
   lastUpdate: new Date(),
 };
 
+// Rate limiting for movement updates
+const MOVEMENT_UPDATE_RATE_LIMIT = 30; // Max updates per second per player
+const moveUpdateTimestamps = new Map<string, number[]>(); // clientId -> array of timestamps
+
+// Helper function to check if client can send movement update
+function canSendMovementUpdate(clientId: string): boolean {
+  const now = Date.now();
+  const timestamps = moveUpdateTimestamps.get(clientId) || [];
+  
+  // Remove timestamps older than 1 second
+  const recentTimestamps = timestamps.filter(timestamp => now - timestamp < 1000);
+  
+  // Check if under rate limit
+  if (recentTimestamps.length >= MOVEMENT_UPDATE_RATE_LIMIT) {
+    return false;
+  }
+  
+  // Add current timestamp and update map
+  recentTimestamps.push(now);
+  moveUpdateTimestamps.set(clientId, recentTimestamps);
+  
+  return true;
+}
+
 // Helper function to create safe player data for broadcasting (removes sensitive info)
 function createSafePlayerData(player: Player): Partial<Player> {
   return {
     id: player.id,
     position: player.position,
+    rotation: player.rotation,
     health: player.health,
     maxHealth: player.maxHealth,
     level: player.level,
@@ -119,6 +144,7 @@ interface ConnectData {
   userEmail?: string;
   userName?: string;
   position?: Position;
+  rotation?: Position;
 }
 
 async function handleConnect(clientId: string, data: ConnectData): Promise<void> {
@@ -172,11 +198,18 @@ async function handleConnect(clientId: string, data: ConnectData): Promise<void>
         console.log(`Found existing player: ${player.username} (${userId})`);
       }
 
-      // Update player position if provided in connect data
+      // Update player position and rotation if provided in connect data
       if (data.position && typeof data.position.x === 'number' && typeof data.position.y === 'number' && typeof data.position.z === 'number') {
         player.position = data.position;
-        await playerService.updatePlayerPosition(userId, data.position);
-        console.log(`Updated player position to:`, data.position);
+        
+        if (data.rotation && typeof data.rotation.x === 'number' && typeof data.rotation.y === 'number' && typeof data.rotation.z === 'number') {
+          player.rotation = data.rotation;
+          await playerService.updatePlayerPositionAndRotation(userId, data.position, data.rotation);
+          console.log(`Updated player position and rotation:`, data.position, data.rotation);
+        } else {
+          await playerService.updatePlayerPosition(userId, data.position);
+          console.log(`Updated player position to:`, data.position);
+        }
       }
 
       // Set player online
@@ -229,6 +262,7 @@ async function handleConnect(clientId: string, data: ConnectData): Promise<void>
 
 interface MoveData {
   position: Position;
+  rotation?: Position;
 }
 
 async function handlePlayerMove(clientId: string, data: MoveData): Promise<void> {
@@ -238,33 +272,52 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
     return;
   }
 
+  // Check rate limit
+  if (!canSendMovementUpdate(clientId)) {
+    // Silently drop the update if rate limited - no need to send error
+    return;
+  }
+
   try {
-    const { position } = data;
+    const { position, rotation } = data;
     if (!position || typeof position.x !== 'number' || typeof position.y !== 'number' || typeof position.z !== 'number') {
       sendErrorMessage(clientId, 'Invalid position data');
       return;
     }
 
-    console.log(`Player ${client.playerId} moving to position:`, position);
+    console.log(`Player ${client.playerId} moving to position:`, position, rotation ? `with rotation:` : '', rotation);
 
-    // Update player position in database
-    await playerService.updatePlayerPosition(client.userId, position);
+    // Update player position and rotation in database
+    if (rotation && typeof rotation.x === 'number' && typeof rotation.y === 'number' && typeof rotation.z === 'number') {
+      await playerService.updatePlayerPositionAndRotation(client.userId, position, rotation);
+    } else {
+      await playerService.updatePlayerPosition(client.userId, position);
+    }
 
     // Update game state
     const player = gameState.players.get(client.playerId!);
     if (player) {
       player.position = position;
+      if (rotation) {
+        player.rotation = rotation;
+      }
       player.lastUpdate = new Date();
     }
 
     // Broadcast position update to other clients
+    const broadcastData: any = {
+      playerId: client.playerId,
+      position,
+      timestamp: new Date(),
+    };
+    
+    if (rotation) {
+      broadcastData.rotation = rotation;
+    }
+
     broadcastToOthers(clientId, {
       type: 'player_moved',
-      data: {
-        playerId: client.playerId,
-        position,
-        timestamp: new Date(),
-      },
+      data: broadcastData,
     });
   } catch (error) {
     console.error('Player move error:', error);
@@ -314,6 +367,9 @@ async function handleDisconnect(clientId: string): Promise<void> {
   const client = clients.get(clientId);
   if (client) {
     console.log(`Client disconnected: ${clientId}`);
+
+    // Clean up rate limiting data
+    moveUpdateTimestamps.delete(clientId);
 
     // Set player offline if authenticated
     if (client.userId) {

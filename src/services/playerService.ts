@@ -12,6 +12,7 @@ export class PlayerService {
       username,
       email,
       position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
       health: 100,
       maxHealth: 100,
       level: 1,
@@ -43,6 +44,7 @@ export class PlayerService {
       username: player.username,
       email: player.email,
       position: player.position,
+      rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
       health: player.health,
       maxHealth: player.maxHealth,
       level: player.level,
@@ -60,6 +62,21 @@ export class PlayerService {
       {
         $set: {
           position,
+          lastUpdate: new Date(),
+        },
+      }
+    );
+  }
+
+  async updatePlayerPositionAndRotation(userId: string, position: Position, rotation: Position): Promise<void> {
+    const db = getDatabase();
+    
+    await db.collection(this.collection).updateOne(
+      { userId },
+      {
+        $set: {
+          position,
+          rotation,
           lastUpdate: new Date(),
         },
       }
@@ -107,6 +124,7 @@ export class PlayerService {
       username: player.username,
       email: player.email,
       position: player.position,
+      rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
       health: player.health,
       maxHealth: player.maxHealth,
       level: player.level,

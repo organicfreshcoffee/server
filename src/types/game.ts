@@ -6,6 +6,7 @@ export interface Player {
   username: string;
   email?: string;
   position: Position;
+  rotation: Position; // Rotation in x, y, z axes
   health: number;
   maxHealth: number;
   level: number;
