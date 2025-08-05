@@ -1,6 +1,5 @@
 import { getDatabase } from '../config/database';
 import { Player, Position } from '../types/game';
-import { ObjectId } from 'mongodb';
 
 export class PlayerService {
   private readonly collection = 'players';

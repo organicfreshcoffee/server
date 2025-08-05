@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthService } from './authService';
 import { PlayerService } from './playerService';
-import { GameMessage, WebSocketClient, GameState, Player } from '../types/game';
+import { GameMessage, WebSocketClient, GameState, Player, Position } from '../types/game';
 
 const authService = new AuthService();
 const playerService = new PlayerService();
@@ -14,7 +14,7 @@ const gameState: GameState = {
 };
 
 // Helper function to create safe player data for broadcasting (removes sensitive info)
-function createSafePlayerData(player: Player) {
+function createSafePlayerData(player: Player): Partial<Player> {
   return {
     id: player.id,
     position: player.position,
@@ -111,7 +111,17 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
   }
 }
 
-async function handleConnect(clientId: string, data: any): Promise<void> {
+interface ConnectData {
+  token?: string;
+  authToken?: string;
+  userId?: string;
+  playerId?: string;
+  userEmail?: string;
+  userName?: string;
+  position?: Position;
+}
+
+async function handleConnect(clientId: string, data: ConnectData): Promise<void> {
   const client = clients.get(clientId);
   if (!client) {
     return;
@@ -142,7 +152,7 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
     // Fallback: use userId and userEmail directly (for development)
     if (!userId && (data.userId || data.playerId)) {
       console.log(`Using fallback authentication for client ${clientId}`);
-      userId = data.userId || data.playerId;
+      userId = data.userId || data.playerId || null;
       userEmail = data.userEmail || null;
       userName = data.userName || (userEmail ? userEmail.split('@')[0] : 'Player');
     }
@@ -217,7 +227,11 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
   }
 }
 
-async function handlePlayerMove(clientId: string, data: any): Promise<void> {
+interface MoveData {
+  position: Position;
+}
+
+async function handlePlayerMove(clientId: string, data: MoveData): Promise<void> {
   const client = clients.get(clientId);
   if (!client || !client.isAuthenticated || !client.userId) {
     sendErrorMessage(clientId, 'Not authenticated');
@@ -258,7 +272,13 @@ async function handlePlayerMove(clientId: string, data: any): Promise<void> {
   }
 }
 
-async function handlePlayerAction(clientId: string, data: any): Promise<void> {
+interface ActionData {
+  action: string;
+  target?: string;
+  data?: Record<string, unknown>;
+}
+
+async function handlePlayerAction(clientId: string, data: ActionData): Promise<void> {
   const client = clients.get(clientId);
   if (!client || !client.isAuthenticated) {
     sendErrorMessage(clientId, 'Not authenticated');

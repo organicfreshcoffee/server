@@ -10,7 +10,7 @@ export function errorHandler(
   error: AppError,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ): void {
   // Don't log handled errors in test environment
   if (process.env.NODE_ENV !== 'test') {

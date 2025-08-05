@@ -1,3 +1,5 @@
+import { WebSocket } from 'ws';
+
 export interface Player {
   id: string;
   userId: string;
@@ -19,7 +21,7 @@ export interface Position {
 }
 
 export interface GameState {
-  worldData?: any;
+  worldData?: Record<string, unknown>;
   players: Map<string, Player>;
   gameStarted: boolean;
   lastUpdate: Date;
@@ -27,13 +29,13 @@ export interface GameState {
 
 export interface GameMessage {
   type: string;
-  data: any;
+  data: Record<string, unknown>;
   timestamp?: Date;
 }
 
 export interface WebSocketClient {
   id: string;
-  ws: any; // WebSocket type
+  ws: WebSocket; // WebSocket type
   userId?: string;
   playerId?: string;
   isAuthenticated: boolean;
