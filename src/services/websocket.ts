@@ -13,6 +13,21 @@ const gameState: GameState = {
   lastUpdate: new Date(),
 };
 
+// Helper function to create safe player data for broadcasting (removes sensitive info)
+function createSafePlayerData(player: Player) {
+  return {
+    id: player.id,
+    position: player.position,
+    health: player.health,
+    maxHealth: player.maxHealth,
+    level: player.level,
+    experience: player.experience,
+    lastUpdate: player.lastUpdate,
+    isOnline: player.isOnline,
+    // Explicitly exclude userId, username, and email
+  };
+}
+
 export function setupWebSocketServer(wss: WebSocketServer): void {
   wss.on('connection', (ws: WebSocket) => {
     const clientId = uuidv4();
@@ -163,9 +178,9 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
       sendMessage(clientId, {
         type: 'connect_success',
         data: {
-          player,
+          player, // Send full player data to the connecting user
           gameState: {
-            players: Array.from(gameState.players.values()),
+            players: Array.from(gameState.players.values()).map(createSafePlayerData), // Send safe data for others
             gameStarted: gameState.gameStarted,
           },
         },
@@ -174,16 +189,13 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
       // Send current players list to the new client
       const otherPlayers = Array.from(gameState.players.values())
         .filter(p => p.id !== player.id)
-        .map(p => ({
-          id: p.id,
-          position: p.position
-        }));
+        .map(createSafePlayerData); // Use safe data for other players
 
       if (otherPlayers.length > 0) {
         sendMessage(clientId, {
           type: 'players_list',
           data: {
-            players: otherPlayers
+            players: otherPlayers // Already using safe data
           },
         });
       }
@@ -191,10 +203,7 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
       // Broadcast player joined to other clients
       broadcastToOthers(clientId, {
         type: 'player_joined',
-        data: { 
-          playerId: player.id,
-          position: player.position 
-        },
+        data: createSafePlayerData(player), // Use safe data when broadcasting to others
       });
 
       console.log(`Player connected successfully: ${player.username} (${userId})`);
@@ -364,7 +373,7 @@ function broadcastGameState(): void {
   broadcastToAll({
     type: 'game_state',
     data: {
-      players: Array.from(gameState.players.values()),
+      players: Array.from(gameState.players.values()).map(createSafePlayerData), // Use safe data
       gameStarted: gameState.gameStarted,
       lastUpdate: gameState.lastUpdate,
     },
