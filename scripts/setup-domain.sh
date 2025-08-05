@@ -104,13 +104,13 @@ create_domain_mapping() {
     print_step "Creating domain mapping for Cloud Run..."
     
     # Check if domain mapping already exists
-    if gcloud run domain-mappings describe $DOMAIN --region=$REGION &>/dev/null; then
+    if gcloud beta run domain-mappings describe $DOMAIN --region=$REGION &>/dev/null; then
         print_warning "Domain mapping for '$DOMAIN' already exists"
         print_info "Current mapping:"
-        gcloud run domain-mappings describe $DOMAIN --region=$REGION --format="table(spec.routePolicy.traffic)"
+        gcloud beta run domain-mappings describe $DOMAIN --region=$REGION --format="table(spec.routePolicy.traffic)"
     else
         print_info "Creating domain mapping for '$DOMAIN'..."
-        gcloud run domain-mappings create \
+        gcloud beta run domain-mappings create \
             --service=$SERVICE_NAME \
             --domain=$DOMAIN \
             --region=$REGION
@@ -125,7 +125,7 @@ get_dns_records() {
     print_info "Fetching required DNS records..."
     
     # Get the domain mapping details
-    DNS_RECORDS=$(gcloud run domain-mappings describe $DOMAIN --region=$REGION --format="value(status.resourceRecords[].name,status.resourceRecords[].rrdata)" 2>/dev/null || echo "")
+    DNS_RECORDS=$(gcloud beta run domain-mappings describe $DOMAIN --region=$REGION --format="value(status.resourceRecords[].name,status.resourceRecords[].rrdata)" 2>/dev/null || echo "")
     
     if [ -n "$DNS_RECORDS" ]; then
         print_info "DNS records retrieved successfully!"
@@ -146,7 +146,7 @@ get_dns_records() {
     else
         print_warning "Could not retrieve DNS records automatically"
         print_info "You can get them manually with:"
-        echo "gcloud run domain-mappings describe $DOMAIN --region=$REGION"
+        echo "gcloud beta run domain-mappings describe $DOMAIN --region=$REGION"
     fi
 }
 
@@ -215,7 +215,7 @@ print_next_steps() {
     echo -e "${BLUE}Useful commands:${NC}"
     echo "================"
     echo "# Check domain mapping status"
-    echo "gcloud run domain-mappings describe $DOMAIN --region=$REGION"
+    echo "gcloud beta run domain-mappings describe $DOMAIN --region=$REGION"
     echo ""
     echo "# Check DNS resolution"
     echo "nslookup $DOMAIN"
