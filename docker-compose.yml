@@ -10,7 +10,7 @@ services:
       - NODE_ENV=production
       - PORT=3002
       - AUTH_SERVER_URL=http://host.docker.internal:3001
-      - MONGODB_URI=mongodb://admin:password@mongodb:27018/gamedb?authSource=admin
+      - MONGODB_URI=mongodb://admin:password@mongodb:27017/gamedb?authSource=admin
     depends_on:
       - mongodb
     restart: unless-stopped
@@ -41,7 +41,7 @@ services:
     environment:
       - ME_CONFIG_MONGODB_ADMINUSERNAME=admin
       - ME_CONFIG_MONGODB_ADMINPASSWORD=password
-      - ME_CONFIG_MONGODB_URL=mongodb://admin:password@mongodb:27018/
+      - ME_CONFIG_MONGODB_URL=mongodb://admin:password@mongodb:27017/
       - ME_CONFIG_BASICAUTH_USERNAME=admin
       - ME_CONFIG_BASICAUTH_PASSWORD=password
     depends_on:
