@@ -265,6 +265,13 @@ interface MoveData {
   rotation?: Position;
 }
 
+interface MoveBroadcastData extends Record<string, unknown> {
+  playerId: string;
+  position: Position;
+  rotation?: Position;
+  timestamp: Date;
+}
+
 async function handlePlayerMove(clientId: string, data: MoveData): Promise<void> {
   const client = clients.get(clientId);
   if (!client || !client.isAuthenticated || !client.userId) {
@@ -305,8 +312,8 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
     }
 
     // Broadcast position update to other clients
-    const broadcastData: any = {
-      playerId: client.playerId,
+    const broadcastData: MoveBroadcastData = {
+      playerId: client.playerId!,
       position,
       timestamp: new Date(),
     };
