@@ -102,68 +102,56 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
     return;
   }
 
+  console.log(`Handling connect for client ${clientId} with data:`, JSON.stringify(data, null, 2));
+
   try {
+    let userId: string | null = null;
+    let userEmail: string | null = null;
+    let userName: string | null = null;
+
     // Check for Firebase token first (preferred method)
-    if (data.token) {
-      const user = await authService.verifyToken(data.token);
+    const token = data.token || data.authToken;
+    if (token) {
+      console.log(`Attempting token verification for client ${clientId}`);
+      const user = await authService.verifyToken(token);
       if (user) {
-        client.userId = user.uid;
-        client.isAuthenticated = true;
-
-        // Get or create player
-        let player = await playerService.getPlayer(user.uid);
-        if (!player) {
-          player = await playerService.createPlayer(
-            user.uid,
-            user.name || user.email?.split('@')[0] || 'Player',
-            user.email
-          );
-        }
-
-        // Set player online
-        await playerService.setPlayerOnlineStatus(user.uid, true);
-        client.playerId = player.id;
-        gameState.players.set(player.id, player);
-
-        // Send success response
-        sendMessage(clientId, {
-          type: 'connect_success',
-          data: {
-            player,
-            gameState: {
-              players: Array.from(gameState.players.values()),
-              gameStarted: gameState.gameStarted,
-            },
-          },
-        });
-
-        // Broadcast player joined to other clients
-        broadcastToOthers(clientId, {
-          type: 'player_joined',
-          data: { player },
-        });
-
-        console.log(`Player connected: ${player.username} (${user.uid})`);
-        return;
+        userId = user.uid;
+        userEmail = user.email || null;
+        userName = user.name || null;
+        console.log(`Token verification successful for user: ${userId}`);
+      } else {
+        console.log(`Token verification failed for client ${clientId}`);
       }
     }
     
     // Fallback: use userId and userEmail directly (for development)
-    if (data.userId && data.userEmail) {
-      const userId = data.userId;
-      const userEmail = data.userEmail;
-      
+    if (!userId && (data.userId || data.playerId)) {
+      console.log(`Using fallback authentication for client ${clientId}`);
+      userId = data.userId || data.playerId;
+      userEmail = data.userEmail || null;
+      userName = data.userName || (userEmail ? userEmail.split('@')[0] : 'Player');
+    }
+
+    // If we have a valid user ID, proceed with authentication
+    if (userId) {
       client.userId = userId;
       client.isAuthenticated = true;
 
       // Get or create player
       let player = await playerService.getPlayer(userId);
       if (!player) {
-        player = await playerService.createPlayer(
-          userId,
-          userEmail.split('@')[0] || 'Player',
-          userEmail
-        );
+        const displayName = userName || (userEmail ? userEmail.split('@')[0] : 'Player');
+        player = await playerService.createPlayer(userId, displayName, userEmail || undefined);
+        console.log(`Created new player: ${displayName} (${userId})`);
+      } else {
+        console.log(`Found existing player: ${player.username} (${userId})`);
+      }
+
+      // Update player position if provided in connect data
+      if (data.position && typeof data.position.x === 'number' && typeof data.position.y === 'number' && typeof data.position.z === 'number') {
+        player.position = data.position;
+        await playerService.updatePlayerPosition(userId, data.position);
+        console.log(`Updated player position to:`, data.position);
       }
 
       // Set player online
@@ -183,19 +171,40 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
         },
       });
 
+      // Send current players list to the new client
+      const otherPlayers = Array.from(gameState.players.values())
+        .filter(p => p.id !== player.id)
+        .map(p => ({
+          id: p.id,
+          position: p.position
+        }));
+
+      if (otherPlayers.length > 0) {
+        sendMessage(clientId, {
+          type: 'players_list',
+          data: {
+            players: otherPlayers
+          },
+        });
+      }
+
       // Broadcast player joined to other clients
       broadcastToOthers(clientId, {
         type: 'player_joined',
-        data: { player },
+        data: { 
+          playerId: player.id,
+          position: player.position 
+        },
       });
 
-      console.log(`Player connected: ${player.username} (${userId})`);
+      console.log(`Player connected successfully: ${player.username} (${userId})`);
     } else {
-      sendErrorMessage(clientId, 'Authentication token or user credentials required');
+      console.log(`Authentication failed for client ${clientId} - no valid credentials provided`);
+      sendErrorMessage(clientId, 'Authentication failed: Please provide a valid token or user credentials');
     }
   } catch (error) {
-    console.error('Connect error:', error);
-    sendErrorMessage(clientId, 'Connection failed');
+    console.error(`Connect error for client ${clientId}:`, error);
+    sendErrorMessage(clientId, 'Connection failed due to server error');
   }
 }
 
@@ -213,6 +222,8 @@ async function handlePlayerMove(clientId: string, data: any): Promise<void> {
       return;
     }
 
+    console.log(`Player ${client.playerId} moving to position:`, position);
+
     // Update player position in database
     await playerService.updatePlayerPosition(client.userId, position);
 
@@ -225,7 +236,7 @@ async function handlePlayerMove(clientId: string, data: any): Promise<void> {
 
     // Broadcast position update to other clients
     broadcastToOthers(clientId, {
-      type: 'player_update',
+      type: 'player_moved',
       data: {
         playerId: client.playerId,
         position,
