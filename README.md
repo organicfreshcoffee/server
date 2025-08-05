@@ -110,6 +110,13 @@ docker compose up -d mongodb
 - `npm run lint` - Run ESLint
 - `npm run lint:fix` - Fix ESLint errors
 
+
+## Running the MongoDB Migrations
+```
+docker build -f migration.Dockerfile -t db-migration .
+docker run --rm -e MONGODB_URI="your-mongodb-connection-string-here" db-migration
+```
+
 ## 🏗️ Project Structure
 
 ```
