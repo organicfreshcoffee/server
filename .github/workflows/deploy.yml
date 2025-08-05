@@ -85,10 +85,7 @@ jobs:
           --max-instances 10 \
           --concurrency 1000 \
           --timeout 3600 \
-          --set-env-vars NODE_ENV=production \
-          --set-env-vars AUTH_SERVER_URL=${{ secrets.AUTH_SERVER_URL }} \
-          --set-env-vars MONGODB_URI=${{ secrets.MONGODB_URI }} \
-          --set-env-vars CLIENT_URL=${{ secrets.CLIENT_URL }}
+          --set-env-vars NODE_ENV=production,AUTH_SERVER_URL=${{ secrets.AUTH_SERVER_URL }},MONGODB_URI=${{ secrets.MONGODB_URI }},CLIENT_URL=${{ secrets.CLIENT_URL }}
           
     - name: Get Cloud Run URL
       run: |
