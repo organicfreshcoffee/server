@@ -34,26 +34,6 @@ async function initializeDatabase() {
     await db.collection('game_sessions').createIndex({ "startTime": 1 });
 
     console.log('Indexes created');
-
-    // Insert sample data for testing (optional)
-    const playerCount = await db.collection('players').countDocuments();
-    if (playerCount === 0) {
-      await db.collection('players').insertOne({
-        userId: "test-user-1",
-        username: "TestPlayer",
-        email: "test@example.com",
-        position: { x: 0, y: 0, z: 0 },
-        health: 100,
-        maxHealth: 100,
-        level: 1,
-        experience: 0,
-        lastUpdate: new Date(),
-        isOnline: false
-      });
-      
-      console.log('Sample player data inserted');
-    }
-
     console.log('Game database initialized successfully');
 
   } catch (error) {
