@@ -40,14 +40,6 @@ if ! docker compose version &> /dev/null; then
 fi
 
 echo "✅ Docker Compose detected"
-    read -p "Continue anyway? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        exit 1
-    fi
-else
-    echo "✅ Google Cloud CLI is installed"
-fi
 
 # Install npm dependencies
 echo "📦 Installing Node.js dependencies..."
@@ -109,6 +101,6 @@ echo "Important Notes:"
 echo "  - This game server requires an auth server to verify Firebase tokens"
 echo "  - Default auth server URL: http://localhost:3001"
 echo "  - Game server will run on port 3002"
-echo "  - MongoDB will run on port 27017"
+echo "  - MongoDB will run on port 27018"
 echo ""
 echo "For more information, see README.md"

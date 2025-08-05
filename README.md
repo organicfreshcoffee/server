@@ -45,7 +45,7 @@ AUTH_SERVER_URL=http://localhost:3001
 CLIENT_URL=http://localhost:3000
 
 # Database Configuration
-MONGODB_URI=mongodb://admin:password@localhost:27017/gamedb?authSource=admin
+MONGODB_URI=mongodb://admin:password@localhost:27018/gamedb?authSource=admin
 ```
 
 ### 3. Start the Server
@@ -59,7 +59,7 @@ MONGODB_URI=mongodb://admin:password@localhost:27017/gamedb?authSource=admin
 - **Game Server API**: [http://localhost:3002](http://localhost:3002/)
 - **WebSocket Endpoint**: `ws://localhost:3002/game`
 - **Health Check**: [http://localhost:3002/health](http://localhost:3002/health)
-- **MongoDB**: `mongodb://admin:password@localhost:27017/gamedb`
+- **MongoDB**: `mongodb://admin:password@localhost:27018/gamedb`
 - **MongoDB Express**: [http://localhost:8081](http://localhost:8081/) (admin/password)
 
 ## 📦 Dependencies

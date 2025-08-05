@@ -12,7 +12,7 @@ services:
       - NODE_ENV=production
       - PORT=3002
       - AUTH_SERVER_URL=${AUTH_SERVER_URL:-https://organicfreshcoffee.com:3001}
-      - MONGODB_URI=${MONGODB_URI:-mongodb://admin:password@mongodb:27017/gamedb?authSource=admin}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://admin:password@mongodb:27018/gamedb?authSource=admin}
     depends_on:
       - mongodb
     restart: unless-stopped
@@ -29,7 +29,7 @@ services:
   mongodb:
     image: mongo:7
     ports:
-      - "27017:27017"
+      - "27018:27017"
     environment:
       - MONGO_INITDB_ROOT_USERNAME=admin
       - MONGO_INITDB_ROOT_PASSWORD=password

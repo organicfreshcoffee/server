@@ -20,20 +20,20 @@ router.get('/verify', async (req, res) => {
     const user = await authService.verifyToken(token);
     
     if (user) {
-      res.json({
+      return res.json({
         success: true,
         user,
         message: 'Token is valid',
       });
     } else {
-      res.status(403).json({
+      return res.status(403).json({
         success: false,
         error: 'Invalid or expired token',
       });
     }
   } catch (error) {
     console.error('Verification error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: 'Internal server error',
     });
