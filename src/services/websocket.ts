@@ -86,15 +86,15 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
   try {
     switch (message.type) {
       case 'connect':
-        await handleConnect(clientId, message.data);
+        await handleConnect(clientId, message.data as unknown as ConnectData);
         break;
 
       case 'player_move':
-        await handlePlayerMove(clientId, message.data);
+        await handlePlayerMove(clientId, message.data as unknown as MoveData);
         break;
 
       case 'player_action':
-        await handlePlayerAction(clientId, message.data);
+        await handlePlayerAction(clientId, message.data as unknown as ActionData);
         break;
 
       case 'ping':
