@@ -7,15 +7,12 @@ services:
       context: .
       dockerfile: Dockerfile.prod
     ports:
-      - "3001:3001"
+      - "3002:3002"
     environment:
       - NODE_ENV=production
-      - PORT=3001
+      - PORT=3002
+      - AUTH_SERVER_URL=${AUTH_SERVER_URL:-https://organicfreshcoffee.com:3001}
       - MONGODB_URI=${MONGODB_URI:-mongodb://admin:password@mongodb:27017/gamedb?authSource=admin}
-      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
-      - GOOGLE_APPLICATION_CREDENTIALS=./service-account-key.json
-    volumes:
-      - ./service-account-key.json:/app/service-account-key.json:ro
     depends_on:
       - mongodb
     restart: unless-stopped

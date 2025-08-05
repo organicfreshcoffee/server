@@ -138,7 +138,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
-# Firebase service account files
+# Google Cloud
 service-account-key.json
-firebase-service-account.json
-firebase-client-config.json
+gcp-key.json
+*.json.backup

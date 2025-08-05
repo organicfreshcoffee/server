@@ -1,25 +1,43 @@
 import { Router } from 'express';
-import { authenticateToken } from '../middleware/auth';
+import { AuthService } from '../services/authService';
 
 const router = Router();
+const authService = new AuthService();
 
-// Test authentication endpoint
-router.get('/verify', authenticateToken, (req, res) => {
-  res.json({
-    success: true,
-    user: (req as any).user,
-    message: 'Token is valid',
-  });
-});
+// Verify authentication token by calling the auth server
+router.get('/verify', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
-// User profile endpoint
-router.get('/profile', authenticateToken, (req, res) => {
-  const user = (req as any).user;
-  res.json({
-    uid: user.uid,
-    email: user.email,
-    name: user.name,
-  });
+    if (!token) {
+      return res.status(401).json({ 
+        success: false, 
+        error: 'Access token required' 
+      });
+    }
+
+    const user = await authService.verifyToken(token);
+    
+    if (user) {
+      res.json({
+        success: true,
+        user,
+        message: 'Token is valid',
+      });
+    } else {
+      res.status(403).json({
+        success: false,
+        error: 'Invalid or expired token',
+      });
+    }
+  } catch (error) {
+    console.error('Verification error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+    });
+  }
 });
 
 export default router;

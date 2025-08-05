@@ -1,30 +1,28 @@
 #!/bin/bash
 
 # Organic Fresh Coffee Game Server Setup Script
-# This script installs all dependencies and sets up the development environment
+# This script sets up the development environment for the game server
 
 set -e  # Exit on error
 
 echo "🎮 Setting up Organic Fresh Coffee Game Server..."
-echo "=================================================="
+echo "==============================================="
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed. Please install Node.js v18 or higher."
+    echo "❌ Node.js is not installed. Please install Node.js 18 or higher."
     echo "Visit: https://nodejs.org/"
     exit 1
 fi
 
 # Check Node.js version
-NODE_VERSION=$(node --version | cut -d'v' -f2)
-REQUIRED_VERSION="18.0.0"
-
-if ! node -e "process.exit(require('semver').gte('$NODE_VERSION', '$REQUIRED_VERSION') ? 0 : 1)" 2>/dev/null; then
-    echo "❌ Node.js version $NODE_VERSION is too old. Please install v$REQUIRED_VERSION or higher."
+NODE_VERSION=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
+if [ "$NODE_VERSION" -lt 18 ]; then
+    echo "❌ Node.js version 18 or higher is required. Current version: $(node --version)"
     exit 1
 fi
 
-echo "✅ Node.js version: v$NODE_VERSION"
+echo "✅ Node.js $(node --version) detected"
 
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
@@ -33,21 +31,15 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
+echo "✅ Docker detected"
+
 # Check if Docker Compose is available
 if ! docker compose version &> /dev/null; then
-    echo "❌ Docker Compose is not available. Please install Docker Compose."
+    echo "❌ Docker Compose is not available. Please ensure Docker Desktop is running."
     exit 1
 fi
 
-echo "✅ Docker and Docker Compose are available"
-
-# Check if Google Cloud CLI is installed
-if ! command -v gcloud &> /dev/null; then
-    echo "⚠️  Google Cloud CLI is not installed."
-    echo "For Firebase authentication, please install gcloud CLI:"
-    echo "Visit: https://cloud.google.com/sdk/docs/install"
-    echo ""
-    echo "You can continue without it for local development, but you'll need it for production."
+echo "✅ Docker Compose detected"
     read -p "Continue anyway? (y/N): " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -58,49 +50,50 @@ else
 fi
 
 # Install npm dependencies
-echo "📦 Installing npm dependencies..."
+echo "📦 Installing Node.js dependencies..."
 npm install
 
-# Check if .env file exists
+echo "✅ Dependencies installed successfully"
+
+# Create .env file if it doesn't exist
 if [ ! -f ".env" ]; then
     echo "📝 Creating .env file from template..."
     cp .env.example .env
-    echo "⚠️  Please edit .env file with your configuration before starting the server."
-    echo "   Required variables:"
-    echo "   - GOOGLE_CLOUD_PROJECT"
-    echo "   - GOOGLE_APPLICATION_CREDENTIALS"
+    echo "✅ .env file created"
     echo ""
-fi
-
-# Check if service account key exists
-if [ ! -f "service-account-key.json" ]; then
-    echo "⚠️  Service account key file not found: service-account-key.json"
-    echo "   Please follow the setup instructions in README.md to:"
-    echo "   1. Set up Google Cloud Project"
-    echo "   2. Create service account"
-    echo "   3. Download service account key"
-    echo "   4. Store Firebase secrets in Secret Manager"
-    echo ""
+    echo "⚠️  Please review and update the .env file with your configuration:"
+    echo "   - AUTH_SERVER_URL: URL of the auth server (default: http://localhost:3001)"
+    echo "   - MONGODB_URI: MongoDB connection string (default is fine for local development)"
+else
+    echo "✅ .env file already exists"
 fi
 
 # Build TypeScript
 echo "🔨 Building TypeScript..."
 npm run build
 
-# Set up development database (optional)
-echo "🗃️  Setting up development database..."
-echo "Starting MongoDB container for development..."
-docker compose up -d mongodb
+echo "✅ TypeScript build completed"
 
-# Wait for MongoDB to be ready
-echo "⏳ Waiting for MongoDB to be ready..."
-sleep 10
-
-# Check if MongoDB is running
-if docker compose ps mongodb | grep -q "Up"; then
-    echo "✅ MongoDB is running"
+# Test MongoDB connection
+echo "�️  Testing MongoDB connection..."
+if docker compose up -d mongodb; then
+    echo "✅ MongoDB container started"
+    
+    # Wait for MongoDB to be ready
+    echo "⏳ Waiting for MongoDB to be ready..."
+    sleep 10
+    
+    # Test connection
+    if docker compose exec -T mongodb mongosh --eval "db.runCommand('ping')" &> /dev/null; then
+        echo "✅ MongoDB connection test passed"
+    else
+        echo "⚠️  MongoDB connection test failed, but container is running"
+    fi
+    
+    # Stop MongoDB (will be started again by start.sh)
+    docker compose stop mongodb
 else
-    echo "❌ Failed to start MongoDB"
+    echo "❌ Failed to start MongoDB container"
     exit 1
 fi
 
@@ -108,17 +101,14 @@ echo ""
 echo "🎉 Setup completed successfully!"
 echo ""
 echo "Next steps:"
-echo "1. Edit .env file with your configuration"
-echo "2. Set up Google Cloud Project and Firebase (see README.md)"
-echo "3. Run './start.sh' to start the server"
+echo "  1. Review and update the .env file if needed"
+echo "  2. Ensure the auth server is running on the configured URL"
+echo "  3. Run './start.sh' to start the game server"
 echo ""
-echo "For development:"
-echo "  npm run dev    # Start development server with hot reload"
+echo "Important Notes:"
+echo "  - This game server requires an auth server to verify Firebase tokens"
+echo "  - Default auth server URL: http://localhost:3001"
+echo "  - Game server will run on port 3002"
+echo "  - MongoDB will run on port 27017"
 echo ""
-echo "For production:"
-echo "  ./start.sh     # Start with Docker Compose"
-echo ""
-echo "Database management:"
-echo "  MongoDB Express: http://localhost:8081 (admin/password)"
-echo "  MongoDB Direct: mongodb://admin:password@localhost:27017/gamedb"
-echo ""
+echo "For more information, see README.md"

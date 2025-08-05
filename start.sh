@@ -24,17 +24,13 @@ fi
 source .env
 
 # Check required environment variables
-if [ -z "$GOOGLE_CLOUD_PROJECT" ]; then
-    echo "❌ GOOGLE_CLOUD_PROJECT is not set in .env file"
-    exit 1
+if [ -z "$AUTH_SERVER_URL" ]; then
+    echo "⚠️  AUTH_SERVER_URL is not set in .env file, using default: http://localhost:3001"
 fi
 
 # Check if service account key exists
-if [ ! -f "service-account-key.json" ]; then
-    echo "❌ service-account-key.json not found"
-    echo "Please follow the setup instructions in README.md"
-    exit 1
-fi
+# Note: This server no longer needs Firebase service account keys
+# Authentication is handled by calling the auth server
 
 # Build and start services
 echo "🔨 Building and starting services..."
@@ -70,7 +66,7 @@ fi
 echo "🔍 Testing server health..."
 sleep 5  # Give server more time to start
 
-if curl -f http://localhost:3001/health &> /dev/null; then
+if curl -f http://localhost:3002/health &> /dev/null; then
     echo "✅ Server health check passed"
 else
     echo "⚠️  Server health check failed, but container is running"
@@ -81,9 +77,9 @@ echo ""
 echo "🎉 Game Server started successfully!"
 echo ""
 echo "Server Information:"
-echo "  🌐 HTTP API: http://localhost:3001"
-echo "  📡 WebSocket: ws://localhost:3001/game"
-echo "  🏥 Health Check: http://localhost:3001/health"
+echo "  🌐 HTTP API: http://localhost:3002"
+echo "  📡 WebSocket: ws://localhost:3002/game"
+echo "  🏥 Health Check: http://localhost:3002/health"
 echo ""
 echo "Database Information:"
 echo "  🗃️  MongoDB: mongodb://admin:password@localhost:27017/gamedb"

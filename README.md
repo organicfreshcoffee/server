@@ -1,16 +1,14 @@
 # Organic Fresh Coffee Game Server
 
-A TypeScript Express server with WebSocket support for multiplayer gaming, featuring Firebase authentication, MongoDB data persistence, and Google Cloud Secret Manager integration.
+A TypeScript Express server with WebSocket support for multiplayer gaming, featuring MongoDB data persistence and external Firebase authentication via auth server.
 
 ## 🏗️ Architecture
 
 - **Backend**: Express.js with TypeScript
 - **WebSocket**: Real-time multiplayer communication
-- **Authentication**: Firebase Auth with JWT token verification
+- **Authentication**: External auth server for Firebase token verification
 - **Database**: MongoDB for player data, positions, and game state
-- **Secrets Management**: Google Cloud Secret Manager
 - **Infrastructure**: Docker Compose for local development
-- **Cloud**: Google Cloud Platform (GCP) integration
 
 ## 📋 Prerequisites
 
@@ -19,9 +17,7 @@ Before you begin, ensure you have the following installed:
 - [Node.js](https://nodejs.org/) (v18 or higher)
 - [Docker](https://www.docker.com/get-started) and Docker Compose
 - [Git](https://git-scm.com/)
-- A [Firebase](https://firebase.google.com/) account
-- A [Google Cloud Platform](https://cloud.google.com/) account
-- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (gcloud)
+- Access to an auth server for Firebase token verification (e.g., the landing page server)
 
 ## 🚀 Quick Start
 
@@ -33,121 +29,36 @@ cd server
 ./setup.sh
 ```
 
-### 2. Set Up Firebase
+### 2. Configure Environment
 
-#### Create a Firebase Project
-
-1. Go to the [Firebase Console](https://console.firebase.google.com/)
-2. Click "Create a project" or "Add project"
-3. Follow the setup wizard to create your project
-4. Enable Authentication:
-   - Go to Authentication > Sign-in method
-   - Enable Email/Password provider
-
-#### Generate Firebase Credentials
-
-**For Admin SDK (Server-side):**
-
-1. In Project Settings, go to the Service accounts tab
-2. Click Generate new private key
-3. Download the JSON file and save it temporarily as `firebase-service-account.json`
-
-### 3. Set Up Google Cloud Platform & Secret Manager
-
-This project uses Google Cloud Secret Manager to securely store all Firebase credentials.
-
-#### Install and Configure Google Cloud CLI
+The setup script will create a `.env` file from the template. Review and update it:
 
 ```bash
-# Install Google Cloud CLI (if not already installed)
-# Follow instructions at: https://cloud.google.com/sdk/docs/install
-
-# Authenticate with Google Cloud
-gcloud auth login
-
-# Set your project (use the same project ID as Firebase)
-gcloud config set project YOUR_PROJECT_ID
-
-# Enable Secret Manager API
-gcloud services enable secretmanager.googleapis.com
-```
-
-#### Store Firebase Secrets in Secret Manager
-
-1. **Store Firebase Service Account:**
-
-```bash
-# Create the service account secret
-gcloud secrets create firebase-service-account \
-    --replication-policy="automatic"
-
-# Add the service account JSON file as the secret value
-gcloud secrets versions add firebase-service-account \
-    --data-file="./firebase-service-account.json"
-```
-
-2. **Set up Service Account for Application Access:**
-
-```bash
-# Create a service account for the application
-gcloud iam service-accounts create game-server \
-    --display-name="Game Server Service Account"
-
-# Grant Secret Manager access
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-    --member="serviceAccount:game-server@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
-    --role="roles/secretmanager.secretAccessor"
-
-# Create and download a key for the service account
-gcloud iam service-accounts keys create ./service-account-key.json \
-    --iam-account=game-server@YOUR_PROJECT_ID.iam.gserviceaccount.com
-```
-
-3. **Clean up temporary files:**
-
-```bash
-# Remove the temporary Firebase files (secrets are now in Secret Manager)
-rm firebase-service-account.json
-```
-
-### 4. Configure Environment Variables
-
-Copy the example environment file:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your Google Cloud configuration:
-
-```env
-# Google Cloud Configuration
-GOOGLE_CLOUD_PROJECT=your-gcp-project-id
-GOOGLE_APPLICATION_CREDENTIALS=./service-account-key.json
-
 # Environment Configuration
 NODE_ENV=development
-PORT=3001
+PORT=3002
+
+# Auth Server Configuration (for Firebase token verification)
+AUTH_SERVER_URL=http://localhost:3001
+
+# Client Configuration
 CLIENT_URL=http://localhost:3000
 
 # Database Configuration
 MONGODB_URI=mongodb://admin:password@localhost:27017/gamedb?authSource=admin
-
-# Note: Firebase secrets are stored in GCP Secret Manager
-# See setup instructions above
 ```
 
-### 5. Start the Server
+### 3. Start the Server
 
 ```bash
 ./start.sh
 ```
 
-### 6. Access the Application
+### 4. Access the Application
 
-- **Game Server API**: [http://localhost:3001](http://localhost:3001/)
-- **WebSocket Endpoint**: `ws://localhost:3001/game`
-- **Health Check**: [http://localhost:3001/health](http://localhost:3001/health)
+- **Game Server API**: [http://localhost:3002](http://localhost:3002/)
+- **WebSocket Endpoint**: `ws://localhost:3002/game`
+- **Health Check**: [http://localhost:3002/health](http://localhost:3002/health)
 - **MongoDB**: `mongodb://admin:password@localhost:27017/gamedb`
 - **MongoDB Express**: [http://localhost:8081](http://localhost:8081/) (admin/password)
 
@@ -160,8 +71,6 @@ MONGODB_URI=mongodb://admin:password@localhost:27017/gamedb?authSource=admin
 | express | ^4.18.2 | Web framework |
 | ws | ^8.16.0 | WebSocket library |
 | mongodb | ^6.3.0 | MongoDB driver |
-| firebase-admin | ^12.0.0 | Firebase Admin SDK |
-| @google-cloud/secret-manager | ^5.0.1 | GCP Secret Manager |
 | cors | ^2.8.5 | Cross-origin requests |
 | helmet | ^7.1.0 | Security middleware |
 | uuid | ^9.0.1 | UUID generation |
@@ -207,21 +116,22 @@ docker compose up -d mongodb
 server/
 ├── src/
 │   ├── config/                 # Configuration files
-│   │   ├── database.ts         # MongoDB connection
-│   │   └── firebase.ts         # Firebase Admin setup
+│   │   └── database.ts         # MongoDB connection
 │   ├── middleware/             # Express middleware
-│   │   ├── auth.ts            # Authentication middleware
-│   │   └── errorHandler.ts    # Error handling
+│   │   └── errorHandler.ts     # Error handling
 │   ├── routes/                # API routes
-│   │   └── auth.ts            # Authentication routes
+│   │   └── auth.ts            # Authentication routes (proxy to auth server)
 │   ├── services/              # Business logic
+│   │   ├── authService.ts     # External auth server integration
 │   │   ├── playerService.ts   # Player data management
 │   │   └── websocket.ts       # WebSocket server logic
 │   ├── types/                 # TypeScript type definitions
 │   │   └── game.ts            # Game-related types
 │   └── index.ts               # Server entry point
 ├── docker-compose.yml         # Docker services
+├── docker-compose.prod.yml    # Production Docker services
 ├── Dockerfile                 # Container configuration
+├── Dockerfile.prod            # Production container
 ├── init-mongo.js              # MongoDB initialization
 ├── setup.sh                   # Setup script
 ├── start.sh                   # Start script
@@ -261,6 +171,8 @@ All messages are JSON objects with the following structure:
   }
 }
 ```
+
+*Note: The server will verify this token by calling the configured auth server.*
 
 #### Player Movement
 
@@ -366,11 +278,9 @@ All messages are JSON objects with the following structure:
 
 ## 🔐 Security Features
 
-- **Google Cloud Secret Manager**: All sensitive Firebase credentials stored securely
-- **Firebase Authentication**: Secure user authentication with JWT tokens
-- **JWT Token Verification**: Server-side token validation
-- **No Environment Secrets**: No sensitive data in `.env` files or code
-- **IAM Access Controls**: Fine-grained permissions for secret access
+- **External Auth Server Integration**: Firebase token verification via external auth server
+- **JWT Token Verification**: Secure token validation through auth server proxy
+- **No Direct Firebase Dependencies**: Authentication handled by external service
 - **CORS Configuration**: Cross-origin request security
 - **Helmet Middleware**: Security headers and protection
 - **Input Validation**: WebSocket message validation
@@ -379,24 +289,25 @@ All messages are JSON objects with the following structure:
 
 ### Common Issues
 
-1. **Secret Manager Access Error**
+1. **Auth Server Connection Error**
    ```
-   Error: Failed to retrieve secret: firebase-service-account
+   Error verifying token with auth server
    ```
    
    **Solution:**
-   - Verify your service account has `roles/secretmanager.secretAccessor` permission
-   - Ensure `GOOGLE_APPLICATION_CREDENTIALS` points to the correct service account key
-   - Check that the secret exists: `gcloud secrets list`
+   - Ensure the auth server is running on the configured URL
+   - Check the `AUTH_SERVER_URL` in your `.env` file
+   - Verify the auth server's `/api/auth/verify` endpoint is accessible
 
-2. **Firebase Configuration Error**
+2. **Authentication Token Invalid**
    ```
-   Error: Failed to retrieve Firebase configuration
+   Error: Invalid authentication token
    ```
    
    **Solution:**
-   - Verify the `firebase-service-account` secret exists in Secret Manager
-   - Check the secret contains valid JSON: `gcloud secrets versions access latest --secret="firebase-service-account"`
+   - Ensure the Firebase token is valid and not expired
+   - Check that the auth server can properly verify Firebase tokens
+   - Verify the token is being sent in the correct format
 
 3. **MongoDB Connection Failed**
    ```
@@ -407,7 +318,7 @@ All messages are JSON objects with the following structure:
 
 4. **WebSocket Connection Failed**
    ```
-   WebSocket connection to 'ws://localhost:3001/game' failed
+   WebSocket connection to 'ws://localhost:3002/game' failed
    ```
    
    **Solution:**
@@ -415,25 +326,24 @@ All messages are JSON objects with the following structure:
    - Check server logs: `docker compose logs game-server`
    - Verify the WebSocket endpoint is accessible
 
-5. **Authentication Token Invalid**
-   ```
-   Error: Invalid authentication token
-   ```
-   
-   **Solution:**
-   - Ensure the Firebase token is valid and not expired
-   - Check that the Firebase project ID matches your configuration
-   - Verify the service account has the necessary permissions
-
-6. **Docker Build Failed**
+5. **Docker Build Failed**
    ```
    Error building game-server
    ```
    
    **Solution:**
    - Ensure all dependencies are installed: `./setup.sh`
-   - Check that all required files exist (especially `service-account-key.json`)
    - Try rebuilding: `docker compose build --no-cache game-server`
+
+6. **Port Already in Use**
+   ```
+   Error: Port 3002 is already in use
+   ```
+   
+   **Solution:**
+   - Stop any existing services on port 3002
+   - Change the port in `.env` and Docker configuration files
+   - Check what's using the port: `lsof -i :3002`
 
 ### Debug Commands
 
@@ -454,15 +364,8 @@ docker compose restart game-server
 docker compose down
 docker compose up --build
 
-# Check Secret Manager secrets
-gcloud secrets list
-
-# View a secret value (for debugging)
-gcloud secrets versions access latest --secret="firebase-service-account"
-
-# Test service account permissions
-gcloud auth activate-service-account --key-file=./service-account-key.json
-gcloud secrets versions access latest --secret="firebase-service-account"
+# Test auth server connection
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:3001/api/auth/verify
 
 # Reset MongoDB and rerun initialization script
 docker compose down
@@ -474,12 +377,12 @@ docker compose up -d mongodb
 
 ### Production Considerations
 
-1. **Environment Variables**: Use production Firebase project
-2. **Secret Manager**: Store sensitive data in GCP Secret Manager
-3. **Database**: Use MongoDB Atlas or managed MongoDB
-4. **SSL/TLS**: Configure HTTPS and WSS
-5. **Load Balancing**: Consider multiple server instances
-6. **Monitoring**: Add application monitoring and logging
+1. **Environment Variables**: Configure production auth server URL
+2. **Database**: Use MongoDB Atlas or managed MongoDB
+3. **SSL/TLS**: Configure HTTPS and WSS
+4. **Load Balancing**: Consider multiple server instances
+5. **Monitoring**: Add application monitoring and logging
+6. **Auth Server**: Ensure auth server is properly secured and scaled
 
 ### Docker Production Build
 
@@ -508,7 +411,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 If you encounter any issues or need help:
 
 1. Check the Troubleshooting section above
-2. Review the [Firebase Documentation](https://firebase.google.com/docs)
+2. Review the [Express.js Documentation](https://expressjs.com/)
 3. Check [WebSocket API documentation](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket)
 4. Open an issue on GitHub
 5. Check Docker and Docker Compose documentation
@@ -516,8 +419,6 @@ If you encounter any issues or need help:
 ## 🙏 Acknowledgments
 
 - [Express.js](https://expressjs.com/) for the web framework
-- [Firebase](https://firebase.google.com/) for authentication services
 - [MongoDB](https://www.mongodb.com/) for the database
 - [Docker](https://www.docker.com/) for containerization
-- [Google Cloud Platform](https://cloud.google.com/) for secret management
 - [WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSocket) for real-time communication

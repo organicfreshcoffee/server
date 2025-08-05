@@ -1,9 +1,10 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
-import { verifyFirebaseToken } from '../config/firebase';
+import { AuthService } from './authService';
 import { PlayerService } from './playerService';
 import { GameMessage, WebSocketClient, GameState, Player } from '../types/game';
 
+const authService = new AuthService();
 const playerService = new PlayerService();
 const clients = new Map<string, WebSocketClient>();
 const gameState: GameState = {
@@ -102,12 +103,53 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
   }
 
   try {
-    // The client sends userId and userEmail, but we need to verify with Firebase token
-    // For now, we'll work with the provided data and expect token in headers or separate auth
+    // Check for Firebase token first (preferred method)
+    if (data.token) {
+      const user = await authService.verifyToken(data.token);
+      if (user) {
+        client.userId = user.uid;
+        client.isAuthenticated = true;
+
+        // Get or create player
+        let player = await playerService.getPlayer(user.uid);
+        if (!player) {
+          player = await playerService.createPlayer(
+            user.uid,
+            user.name || user.email?.split('@')[0] || 'Player',
+            user.email
+          );
+        }
+
+        // Set player online
+        await playerService.setPlayerOnlineStatus(user.uid, true);
+        client.playerId = player.id;
+        gameState.players.set(player.id, player);
+
+        // Send success response
+        sendMessage(clientId, {
+          type: 'connect_success',
+          data: {
+            player,
+            gameState: {
+              players: Array.from(gameState.players.values()),
+              gameStarted: gameState.gameStarted,
+            },
+          },
+        });
+
+        // Broadcast player joined to other clients
+        broadcastToOthers(clientId, {
+          type: 'player_joined',
+          data: { player },
+        });
+
+        console.log(`Player connected: ${player.username} (${user.uid})`);
+        return;
+      }
+    }
     
+    // Fallback: use userId and userEmail directly (for development)
     if (data.userId && data.userEmail) {
-      // For development, we can work with the provided userId
-      // In production, this should be validated with Firebase token
       const userId = data.userId;
       const userEmail = data.userEmail;
       
@@ -119,7 +161,7 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
       if (!player) {
         player = await playerService.createPlayer(
           userId,
-          userEmail.split('@')[0] || 'Player', // Use email prefix as username
+          userEmail.split('@')[0] || 'Player',
           userEmail
         );
       }
@@ -149,7 +191,7 @@ async function handleConnect(clientId: string, data: any): Promise<void> {
 
       console.log(`Player connected: ${player.username} (${userId})`);
     } else {
-      sendErrorMessage(clientId, 'User ID and email required');
+      sendErrorMessage(clientId, 'Authentication token or user credentials required');
     }
   } catch (error) {
     console.error('Connect error:', error);

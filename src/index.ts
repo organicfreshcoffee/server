@@ -6,7 +6,6 @@ import helmet from 'helmet';
 import dotenv from 'dotenv';
 
 import { connectToDatabase } from './config/database';
-import { initializeFirebase } from './config/firebase';
 import { errorHandler } from './middleware/errorHandler';
 import { setupWebSocketServer } from './services/websocket';
 import authRoutes from './routes/auth';
@@ -15,7 +14,7 @@ import authRoutes from './routes/auth';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
 // Security middleware
@@ -51,11 +50,6 @@ const wss = new WebSocketServer({
 
 async function startServer(): Promise<void> {
   try {
-    // Initialize Firebase Admin SDK
-    console.log('Initializing Firebase...');
-    await initializeFirebase();
-    console.log('Firebase initialized successfully');
-
     // Connect to MongoDB
     console.log('Connecting to MongoDB...');
     await connectToDatabase();
@@ -68,10 +62,11 @@ async function startServer(): Promise<void> {
 
     // Start the server
     server.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🚀 Game Server running on port ${PORT}`);
       console.log(`📡 WebSocket server available at ws://localhost:${PORT}/game`);
       console.log(`🌐 API available at http://localhost:${PORT}`);
       console.log(`🏥 Health check at http://localhost:${PORT}/health`);
+      console.log(`🔐 Auth server: ${process.env.AUTH_SERVER_URL || 'http://localhost:3001'}`);
     });
 
   } catch (error) {
