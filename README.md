@@ -208,12 +208,14 @@ All messages are JSON objects with the following structure:
       "x": 0,
       "y": 1.57,
       "z": 0
-    }
+    },
+    "isMoving": true,
+    "movementDirection": "forward"
   }
 }
 ```
 
-*Note: Rotation is optional. Movement updates are rate-limited to 30 updates per second per player to prevent spam.*
+*Note: All fields except `position` are optional. Movement updates are rate-limited to 30 updates per second per player to prevent spam. The `isMoving` boolean and `movementDirection` ('forward' | 'backward' | 'none') fields enable smooth movement prediction and interpolation on other clients.*
 
 #### Player Actions
 
@@ -265,7 +267,7 @@ All messages are JSON objects with the following structure:
 }
 ```
 
-#### Player Updates
+#### Player Movement Updates
 
 ```json
 {
@@ -274,12 +276,14 @@ All messages are JSON objects with the following structure:
     "playerId": "player_id",
     "position": { "x": 1, "y": 2, "z": 3 },
     "rotation": { "x": 0, "y": 1.57, "z": 0 },
+    "isMoving": true,
+    "movementDirection": "forward",
     "timestamp": "2023-01-01T00:00:00.000Z"
   }
 }
 ```
 
-*Note: Rotation field is included when the player's rotation data is available.*
+*Note: Only `playerId`, `position`, and `timestamp` are always present. Other fields (`rotation`, `isMoving`, `movementDirection`) are included when available and enable smooth movement prediction and interpolation.*
 
 #### Player Joined
 

@@ -263,12 +263,16 @@ async function handleConnect(clientId: string, data: ConnectData): Promise<void>
 interface MoveData {
   position: Position;
   rotation?: Position;
+  isMoving?: boolean;
+  movementDirection?: 'forward' | 'backward' | 'none';
 }
 
 interface MoveBroadcastData extends Record<string, unknown> {
   playerId: string;
   position: Position;
   rotation?: Position;
+  isMoving?: boolean;
+  movementDirection?: 'forward' | 'backward' | 'none';
   timestamp: Date;
 }
 
@@ -286,7 +290,7 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
   }
 
   try {
-    const { position, rotation } = data;
+    const { position, rotation, isMoving, movementDirection } = data;
     if (!position || typeof position.x !== 'number' || typeof position.y !== 'number' || typeof position.z !== 'number') {
       sendErrorMessage(clientId, 'Invalid position data');
       return;
@@ -320,6 +324,14 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
     
     if (rotation) {
       broadcastData.rotation = rotation;
+    }
+    
+    if (typeof isMoving === 'boolean') {
+      broadcastData.isMoving = isMoving;
+    }
+    
+    if (movementDirection && ['forward', 'backward', 'none'].includes(movementDirection)) {
+      broadcastData.movementDirection = movementDirection;
     }
 
     broadcastToOthers(clientId, {
