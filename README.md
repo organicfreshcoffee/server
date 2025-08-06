@@ -210,21 +210,12 @@ All messages are JSON objects with the following structure:
       "z": 0
     },
     "isMoving": true,
-    "velocity": {
-      "x": 2.5,
-      "y": 0,
-      "z": 1.8
-    },
-    "movementDirection": {
-      "x": 0.8,
-      "y": 0,
-      "z": 0.6
-    }
+    "movementDirection": "forward"
   }
 }
 ```
 
-*Note: All fields except `position` are optional. Movement updates are rate-limited to 30 updates per second per player to prevent spam. The `isMoving`, `velocity`, and `movementDirection` fields enable smooth movement prediction and interpolation on other clients.*
+*Note: All fields except `position` are optional. Movement updates are rate-limited to 30 updates per second per player to prevent spam. The `isMoving` boolean and `movementDirection` ('forward' | 'backward' | 'none') fields enable smooth movement prediction and interpolation on other clients.*
 
 #### Player Actions
 
@@ -286,14 +277,13 @@ All messages are JSON objects with the following structure:
     "position": { "x": 1, "y": 2, "z": 3 },
     "rotation": { "x": 0, "y": 1.57, "z": 0 },
     "isMoving": true,
-    "velocity": { "x": 2.5, "y": 0, "z": 1.8 },
-    "movementDirection": { "x": 0.8, "y": 0, "z": 0.6 },
+    "movementDirection": "forward",
     "timestamp": "2023-01-01T00:00:00.000Z"
   }
 }
 ```
 
-*Note: Only `playerId`, `position`, and `timestamp` are always present. Other fields (`rotation`, `isMoving`, `velocity`, `movementDirection`) are included when available and enable smooth movement prediction and interpolation.*
+*Note: Only `playerId`, `position`, and `timestamp` are always present. Other fields (`rotation`, `isMoving`, `movementDirection`) are included when available and enable smooth movement prediction and interpolation.*
 
 #### Player Joined
 

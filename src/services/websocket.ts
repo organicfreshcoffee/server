@@ -264,8 +264,7 @@ interface MoveData {
   position: Position;
   rotation?: Position;
   isMoving?: boolean;
-  velocity?: Position;
-  movementDirection?: Position;
+  movementDirection?: 'forward' | 'backward' | 'none';
 }
 
 interface MoveBroadcastData extends Record<string, unknown> {
@@ -273,8 +272,7 @@ interface MoveBroadcastData extends Record<string, unknown> {
   position: Position;
   rotation?: Position;
   isMoving?: boolean;
-  velocity?: Position;
-  movementDirection?: Position;
+  movementDirection?: 'forward' | 'backward' | 'none';
   timestamp: Date;
 }
 
@@ -292,7 +290,7 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
   }
 
   try {
-    const { position, rotation, isMoving, velocity, movementDirection } = data;
+    const { position, rotation, isMoving, movementDirection } = data;
     if (!position || typeof position.x !== 'number' || typeof position.y !== 'number' || typeof position.z !== 'number') {
       sendErrorMessage(clientId, 'Invalid position data');
       return;
@@ -332,11 +330,7 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
       broadcastData.isMoving = isMoving;
     }
     
-    if (velocity && typeof velocity.x === 'number' && typeof velocity.y === 'number' && typeof velocity.z === 'number') {
-      broadcastData.velocity = velocity;
-    }
-    
-    if (movementDirection && typeof movementDirection.x === 'number' && typeof movementDirection.y === 'number' && typeof movementDirection.z === 'number') {
+    if (movementDirection && ['forward', 'backward', 'none'].includes(movementDirection)) {
       broadcastData.movementDirection = movementDirection;
     }
 
