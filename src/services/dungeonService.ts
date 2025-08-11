@@ -199,8 +199,8 @@ export class DungeonService {
         if (isRoom) {
           childNode = this.generateRoomNode(childName, dungeonNodeName, false);
           roomCount.count++;
-          childNode.parentDoorLocationWidth = Math.random() * (parentNode.hallwayLength || 6);
-          childNode.parentDoorLocationHeight = Math.random() * 2;
+          childNode.parentDoorLocationWidth = Math.floor(Math.random() * (parentNode.hallwayLength || 6));
+          childNode.parentDoorLocationHeight = Math.floor(Math.random() * 2);
         } else {
           childNode = this.generateHallwayNode(childName, dungeonNodeName);
           childNode.hallwayParentDirection = this.getRandomDirection();
@@ -279,8 +279,8 @@ export class DungeonService {
       const room = rooms[Math.floor(Math.random() * rooms.length)];
       if (!room.hasDownwardStair) {
         room.hasDownwardStair = true;
-        room.stairLocationX = Math.random() * (room.roomWidth || 10);
-        room.stairLocationY = Math.random() * (room.roomHeight || 10);
+        room.stairLocationX = Math.floor(Math.random() * (room.roomWidth || 10));
+        room.stairLocationY = Math.floor(Math.random() * (room.roomHeight || 10));
         // stairDungeonDagName will be set when the child dungeon node is created
       }
     }

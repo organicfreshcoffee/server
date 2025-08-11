@@ -5,10 +5,10 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 async function runMigration(): Promise<void> {
-  const uri = process.env.MONGODB_URI;
-  if (!uri) {
-    throw new Error('MONGODB_URI environment variable is required');
-  }
+  // Use the same MongoDB URI as the Docker server (port 27018)
+  const uri = 'mongodb://admin:password@localhost:27018/gamedb?authSource=admin';
+  
+  console.log('Using MongoDB URI: mongodb://admin:***@localhost:27018/gamedb?authSource=admin');
 
   const client = new MongoClient(uri);
   
@@ -33,15 +33,19 @@ async function runMigration(): Promise<void> {
     
     // Clear existing data
     console.log('Clearing existing dungeon data...');
-    await dungeonCollection.deleteMany({});
-    await floorCollection.deleteMany({});
+    const dungeonDeleteResult = await dungeonCollection.deleteMany({});
+    const floorDeleteResult = await floorCollection.deleteMany({});
     
-    // Initialize dungeon
+    console.log(`Deleted ${dungeonDeleteResult.deletedCount} dungeon nodes`);
+    console.log(`Deleted ${floorDeleteResult.deletedCount} floor nodes`);
+    
+    // Initialize dungeon with new data
     console.log('Initializing dungeon...');
     
     // We need to set up a temporary database connection for the service
     // In a real migration, you'd pass the db instance to the service
     process.env.MONGODB_DB_NAME = dbName;
+    process.env.MONGODB_URI = uri;
     
     // Import and set up database connection
     const { connectToDatabase } = await import('./src/config/database');
@@ -49,6 +53,10 @@ async function runMigration(): Promise<void> {
     
     const dungeonService = new DungeonService();
     await dungeonService.initializeDungeon();
+    
+    // Close the database connection from the service to ensure clean state
+    const { closeDatabase } = await import('./src/config/database');
+    await closeDatabase();
     
     console.log('✅ Dungeon migration completed successfully!');
     
