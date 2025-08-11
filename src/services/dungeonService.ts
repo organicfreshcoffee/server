@@ -172,6 +172,9 @@ export class DungeonService {
         // Parent is room, child is hallway
         childNode = this.generateHallwayNode(childName, dungeonNodeName);
         childNode.parentDirection = this.getRandomDirection();
+        // Calculate parentDoorOffset for hallway connecting to room
+        const parentMinSide = Math.min(parentNode.roomWidth || 8, parentNode.roomHeight || 8);
+        childNode.parentDoorOffset = Math.floor(Math.random() * Math.max(1, parentMinSide - 1)) + 1;
         // Set door location on parent room (this would be more sophisticated in a real implementation)
         this.setDoorLocation(parentNode, i, childrenCount);
       } else {
