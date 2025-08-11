@@ -11,7 +11,7 @@ export class DungeonService {
   private readonly GENERATION_BUFFER = 3; // Generate floors when player is within 3 levels
 
   /**
-   * Initialize the dungeon with the root floor and 2 additional floors
+   * Initialize the dungeon with the root floor and randomly generated levels
    */
   async initializeDungeon(): Promise<void> {
     const db = getDatabase();
@@ -23,7 +23,7 @@ export class DungeonService {
     // Generate root dungeon node (depth 0)
     const rootDungeonNode: DungeonDagNode = {
       name: 'A',
-      children: ['AA', 'AB'], // Two downward stairs
+      children: [],
       isDownwardsFromParent: false, // Root has no parent
       isBossLevel: false
     };
@@ -31,45 +31,26 @@ export class DungeonService {
     await db.collection('dungeonDagNodes').insertOne(rootDungeonNode);
     await this.generateFloor(rootDungeonNode.name, true); // Root floor with upward stair
 
-    // Generate first level down (depth 1)
-    const level1NodeA: DungeonDagNode = {
-      name: 'AA',
-      children: ['AAA'],
-      isDownwardsFromParent: true,
-      isBossLevel: false
-    };
+    // Generate children for root using the same random logic
+    await this.generateDungeonChildren(rootDungeonNode);
+    
+    // Get all current nodes and generate a few more levels
+    let allNodes = await db.collection('dungeonDagNodes').find({}).toArray() as unknown as DungeonDagNode[];
+    
+    // Generate 2-3 more levels to start with
+    for (let level = 0; level < 2; level++) {
+      const leafNodes = allNodes.filter(node => node.children.length === 0);
+      
+      for (const leafNode of leafNodes) {
+        await this.generateDungeonChildren(leafNode);
+      }
+      
+      // Refresh the nodes list
+      allNodes = await db.collection('dungeonDagNodes').find({}).toArray() as unknown as DungeonDagNode[];
+    }
 
-    const level1NodeB: DungeonDagNode = {
-      name: 'AB',
-      children: ['ABA'],
-      isDownwardsFromParent: true,
-      isBossLevel: false
-    };
-
-    await db.collection('dungeonDagNodes').insertMany([level1NodeA, level1NodeB]);
-    await this.generateFloor(level1NodeA.name, false);
-    await this.generateFloor(level1NodeB.name, false);
-
-    // Generate second level down (depth 2)
-    const level2NodeA: DungeonDagNode = {
-      name: 'AAA',
-      children: [],
-      isDownwardsFromParent: true,
-      isBossLevel: false
-    };
-
-    const level2NodeB: DungeonDagNode = {
-      name: 'ABA',
-      children: [],
-      isDownwardsFromParent: true,
-      isBossLevel: false
-    };
-
-    await db.collection('dungeonDagNodes').insertMany([level2NodeA, level2NodeB]);
-    await this.generateFloor(level2NodeA.name, false);
-    await this.generateFloor(level2NodeB.name, false);
-
-    console.log('Dungeon initialized with 5 floors');
+    const totalFloors = allNodes.length;
+    console.log(`Dungeon initialized with ${totalFloors} floors`);
   }
 
   /**
@@ -208,13 +189,18 @@ export class DungeonService {
       }
 
       floorNodes.push(childNode);
-      
-      // Recurse for this child
-      await this.generateFloorRecursive(childNode, dungeonNodeName, floorNodes, roomCount, targetRoomCount);
     }
 
     // Update parent with children
     parentNode.children = children;
+
+    // Now recurse for each child
+    for (const childName of children) {
+      const childNode = floorNodes.find(node => node.name === childName);
+      if (childNode && roomCount.count < targetRoomCount) {
+        await this.generateFloorRecursive(childNode, dungeonNodeName, floorNodes, roomCount, targetRoomCount);
+      }
+    }
   }
 
   /**
