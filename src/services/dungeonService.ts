@@ -6,8 +6,8 @@ export class DungeonService {
   private readonly ROOM_COUNT_MAX = 10;
   private readonly ROOM_SIZE_MIN = 8;
   private readonly ROOM_SIZE_MAX = 20;
-  private readonly HALLWAY_LENGTH_MIN = 4;
-  private readonly HALLWAY_LENGTH_MAX = 12;
+  private readonly HALLWAY_LENGTH_MIN = 15;
+  private readonly HALLWAY_LENGTH_MAX = 30;
   private readonly GENERATION_BUFFER = 3; // Generate floors when player is within 3 levels
 
   /**
