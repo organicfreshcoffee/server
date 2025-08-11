@@ -9,7 +9,9 @@
     "start": "node dist/index.js",
     "clean": "rm -rf dist",
     "lint": "eslint src/**/*.ts",
-    "lint:fix": "eslint src/**/*.ts --fix"
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "migrate:dungeon": "npx ts-node migrate-dungeon.ts",
+    "test:dungeon": "npx ts-node test-dungeon.ts"
   },
   "dependencies": {
     "express": "^4.18.2",

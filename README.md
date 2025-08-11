@@ -109,9 +109,21 @@ docker compose up -d mongodb
 - `npm run start` - Start production server
 - `npm run lint` - Run ESLint
 - `npm run lint:fix` - Fix ESLint errors
+- `npm run migrate:dungeon` - Initialize dungeon database tables and generate initial floors
+- `npm run test:dungeon` - Test the dungeon generation system
 
 
 ## Running the MongoDB Migrations
+
+### Dungeon System Migration
+The dungeon generation system requires database initialization:
+
+```bash
+# Initialize dungeon tables and generate initial floors
+npm run migrate:dungeon
+```
+
+### Legacy Migration
 ```
 docker build -f migration.Dockerfile -t db-migration .
 docker run --rm -e MONGODB_URI="your-mongodb-connection-string-here" db-migration
@@ -125,16 +137,21 @@ server/
 │   ├── config/                 # Configuration files
 │   │   └── database.ts         # MongoDB connection
 │   ├── middleware/             # Express middleware
+│   │   ├── auth.ts            # Authentication middleware
 │   │   └── errorHandler.ts     # Error handling
 │   ├── routes/                # API routes
-│   │   └── auth.ts            # Authentication routes (proxy to auth server)
+│   │   ├── auth.ts            # Authentication routes (proxy to auth server)
+│   │   └── dungeon.ts         # Dungeon generation endpoints
 │   ├── services/              # Business logic
 │   │   ├── authService.ts     # External auth server integration
+│   │   ├── dungeonService.ts  # Dungeon and floor generation
 │   │   ├── playerService.ts   # Player data management
 │   │   └── websocket.ts       # WebSocket server logic
 │   ├── types/                 # TypeScript type definitions
-│   │   └── game.ts            # Game-related types
+│   │   └── game.ts            # Game-related types (including dungeon types)
 │   └── index.ts               # Server entry point
+├── migrate-dungeon.ts         # Dungeon database migration
+├── test-dungeon.ts            # Dungeon system test script
 ├── docker-compose.yml         # Docker services
 ├── docker-compose.prod.yml    # Production Docker services
 ├── Dockerfile                 # Container configuration
@@ -350,6 +367,151 @@ All messages are JSON objects with the following structure:
   }
 }
 ```
+
+## 🏰 Dungeon Generation API
+
+The server includes a procedural dungeon generation system with REST endpoints for managing dungeon exploration.
+
+### Authentication
+
+All dungeon endpoints require Firebase authentication. Include the token in the Authorization header:
+
+```
+Authorization: Bearer your_firebase_jwt_token
+```
+
+### Endpoints
+
+#### Player Movement Notification
+
+**POST** `/api/dungeon/player-moved-floor`
+
+Notify the server that a player has moved to a new floor. This triggers automatic generation of additional floors if needed.
+
+**Request Body:**
+```json
+{
+  "newFloorName": "A"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Floor generation checked and updated if needed"
+}
+```
+
+#### Get Floor Layout
+
+**GET** `/api/dungeon/floor/:dungeonDagNodeName`
+
+Retrieve the complete floor layout for rendering on the client.
+
+**Parameters:**
+- `dungeonDagNodeName`: The name of the dungeon node (e.g., "A", "AA", "AB")
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "dungeonDagNodeName": "A",
+    "nodes": [
+      {
+        "name": "A_A",
+        "dungeonDagNodeName": "A",
+        "children": ["A_AA", "A_AB"],
+        "isRoom": true,
+        "hasUpwardStair": true,
+        "hasDownwardStair": false,
+        "roomWidth": 15,
+        "roomHeight": 12,
+        "stairLocationX": 7.5,
+        "stairLocationY": 6.0
+      },
+      {
+        "name": "A_AA",
+        "dungeonDagNodeName": "A",
+        "children": [],
+        "isRoom": false,
+        "hallwayLength": 8
+      }
+    ]
+  }
+}
+```
+
+#### Get Room Stairs
+
+**GET** `/api/dungeon/room-stairs/:floorDagNodeName`
+
+Get stair information for a specific room, including connections to other floors.
+
+**Parameters:**
+- `floorDagNodeName`: The name of the room node (e.g., "A_A")
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "upwardStair": {
+      "floorDagNodeName": "A_A",
+      "dungeonDagNodeName": "ROOT",
+      "locationX": 7.5,
+      "locationY": 6.0
+    },
+    "downwardStair": {
+      "floorDagNodeName": "AA_A",
+      "dungeonDagNodeName": "AA",
+      "locationX": 12.3,
+      "locationY": 8.7
+    }
+  }
+}
+```
+
+#### Get Spawn Location
+
+**GET** `/api/dungeon/spawn`
+
+Get the starting dungeon floor for new players.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "dungeonDagNodeName": "A"
+  }
+}
+```
+
+### Dungeon System Architecture
+
+The dungeon generation system uses two interconnected DAGs (Directed Acyclic Graphs):
+
+#### Dungeon DAG
+- Represents the overall dungeon structure with floors and connections
+- Nodes are named using alphabetic progression: A → AA, AB, AC → AAA, AAB, etc.
+- Each node represents a complete floor
+- Supports infinite procedural generation
+
+#### Floor DAG  
+- Represents the layout of a single floor
+- Contains rooms (rectangular spaces) and hallways (connective passages)
+- Rooms can contain upward/downward stairs
+- Each floor typically contains 5-10 rooms
+
+#### Procedural Generation Features
+
+- **Infinite Generation**: New floors are generated as players explore deeper
+- **Dynamic Loading**: Floors are generated 3 levels ahead of the deepest player
+- **Boss Levels**: Special floors that terminate branches (10% chance)
+- **Multiple Paths**: Each floor can have 1-2 downward connections
+- **Randomized Layouts**: Room sizes, hallway lengths, and connections are procedurally generated
 
 ## 🔐 Security Features
 

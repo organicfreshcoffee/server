@@ -9,6 +9,8 @@ import { connectToDatabase } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import { setupWebSocketServer } from './services/websocket';
 import authRoutes from './routes/auth';
+import dungeonRoutes from './routes/dungeon';
+import { DungeonService } from './services/dungeonService';
 
 // Load environment variables
 dotenv.config();
@@ -35,6 +37,7 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/auth', authRoutes);
+app.use('/api/dungeon', dungeonRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
@@ -55,6 +58,18 @@ async function startServer(): Promise<void> {
     await connectToDatabase();
     console.log('MongoDB connected successfully');
 
+    // Check if dungeon is initialized, if not initialize it
+    console.log('Checking dungeon initialization...');
+    const dungeonService = new DungeonService();
+    const spawn = await dungeonService.getSpawn();
+    if (!spawn) {
+      console.log('Dungeon not found, initializing...');
+      await dungeonService.initializeDungeon();
+      console.log('Dungeon initialized successfully');
+    } else {
+      console.log('Dungeon already initialized');
+    }
+
     // Setup WebSocket server
     console.log('Setting up WebSocket server...');
     setupWebSocketServer(wss);
@@ -67,6 +82,7 @@ async function startServer(): Promise<void> {
       console.log(`🌐 API available at http://localhost:${PORT}`);
       console.log(`🏥 Health check at http://localhost:${PORT}/health`);
       console.log(`🔐 Auth server: ${process.env.AUTH_SERVER_URL || 'http://localhost:3001'}`);
+      console.log(`🏰 Dungeon system initialized and ready`);
     });
 
   } catch (error) {
