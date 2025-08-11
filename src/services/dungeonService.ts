@@ -171,6 +171,7 @@ export class DungeonService {
       if (parentNode.isRoom) {
         // Parent is room, child is hallway
         childNode = this.generateHallwayNode(childName, dungeonNodeName);
+        childNode.parentDirection = this.getRandomDirection();
         // Set door location on parent room (this would be more sophisticated in a real implementation)
         this.setDoorLocation(parentNode, i, childrenCount);
       } else {
@@ -180,11 +181,13 @@ export class DungeonService {
         if (isRoom) {
           childNode = this.generateRoomNode(childName, dungeonNodeName, false);
           roomCount.count++;
-          childNode.parentDoorLocationWidth = Math.floor(Math.random() * (parentNode.hallwayLength || 6));
-          childNode.parentDoorLocationHeight = Math.floor(Math.random() * 2);
+          // Calculate parentDoorOffset as random number from 1 to min(width, height) - 1
+          const minSide = Math.min(childNode.roomWidth || 8, childNode.roomHeight || 8);
+          childNode.parentDoorOffset = Math.floor(Math.random() * Math.max(1, minSide - 1)) + 1;
+          childNode.parentDirection = this.getRandomDirection();
         } else {
           childNode = this.generateHallwayNode(childName, dungeonNodeName);
-          childNode.hallwayParentDirection = this.getRandomDirection();
+          childNode.parentDirection = this.getRandomDirection();
         }
       }
 

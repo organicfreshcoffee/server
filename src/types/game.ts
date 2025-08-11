@@ -62,9 +62,8 @@ export interface FloorDagNode {
   stairDungeonDagName?: string; // reference to the floor that the stair goes to
   stairLocationX?: number; // width location of the stair if room has stair
   stairLocationY?: number; // height location of the stair if room has stair
-  hallwayParentDirection?: 'left' | 'right' | 'center'; // direction from parent if parent is hallway
-  parentDoorLocationWidth?: number; // door location in x axis if parent is hallway
-  parentDoorLocationHeight?: number; // door location in y axis if parent is hallway
+  parentDirection?: 'left' | 'right' | 'center'; // direction relative to parent
+  parentDoorOffset?: number; // offset along the side for doors (1 to min(width,height)-1)
   hallwayLength?: number; // length of hallway if hallway node
   roomWidth?: number; // width of room if room node
   roomHeight?: number; // height of room if room node
