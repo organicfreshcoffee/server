@@ -8,7 +8,6 @@ import dotenv from 'dotenv';
 import { connectToDatabase } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import { setupWebSocketServer } from './services/websocket';
-import authRoutes from './routes/auth';
 import dungeonRoutes from './routes/dungeon';
 import { DungeonService } from './services/dungeonService';
 
@@ -36,7 +35,6 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-app.use('/api/auth', authRoutes);
 app.use('/api/dungeon', dungeonRoutes);
 
 // Error handling middleware

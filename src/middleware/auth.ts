@@ -41,5 +41,6 @@ export async function authenticateToken(req: AuthenticatedRequest, res: Response
       success: false,
       error: 'Internal server error',
     });
+    return;
   }
 }

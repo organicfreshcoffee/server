@@ -17,7 +17,7 @@ export class AuthService {
 
   async verifyToken(token: string): Promise<{ uid: string; email?: string; name?: string } | null> {
     try {
-      const response = await fetch(`${this.authServerUrl}/api/auth/verify`, {
+      const response = await fetch(`${this.authServerUrl}/api/verify`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,

@@ -140,7 +140,6 @@ server/
 │   │   ├── auth.ts            # Authentication middleware
 │   │   └── errorHandler.ts     # Error handling
 │   ├── routes/                # API routes
-│   │   ├── auth.ts            # Authentication routes (proxy to auth server)
 │   │   └── dungeon.ts         # Dungeon generation endpoints
 │   ├── services/              # Business logic
 │   │   ├── authService.ts     # External auth server integration
@@ -518,6 +517,7 @@ The dungeon generation system uses two interconnected DAGs (Directed Acyclic Gra
 - **External Auth Server Integration**: Firebase token verification via external auth server
 - **JWT Token Verification**: Secure token validation through auth server proxy
 - **No Direct Firebase Dependencies**: Authentication handled by external service
+- **No Local Auth Endpoints**: This server focuses on game logic, authentication is delegated
 - **CORS Configuration**: Cross-origin request security
 - **Helmet Middleware**: Security headers and protection
 - **Input Validation**: WebSocket message validation
