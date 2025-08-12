@@ -21,8 +21,18 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: [CLIENT_URL, 'http://localhost:3000'],
+  origin: [
+    'https://organicfreshcoffee.com',
+    'https://www.organicfreshcoffee.com',
+    'https://server.organicfreshcoffee.com',
+    CLIENT_URL,
+    'http://localhost:3000', // for development
+    'http://localhost:3001',
+    'http://localhost:3002'
+  ],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // Body parsing middleware
