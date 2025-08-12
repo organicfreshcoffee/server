@@ -64,7 +64,6 @@ export class DungeonService {
     
     // Calculate depths of all floors
     const depthMap = this.calculateDepths(allNodes);
-    const currentDepth = depthMap[newFloorName] || 0;
     
     // Find the deepest player level
     let deepestPlayerLevel = 0;
@@ -241,7 +240,7 @@ export class DungeonService {
   /**
    * Set door location on a room
    */
-  private setDoorLocation(roomNode: FloorDagNode, doorIndex: number, totalDoors: number): void {
+  private setDoorLocation(roomNode: FloorDagNode, doorIndex: number, _totalDoors: number): void {
     if (!roomNode.roomWidth || !roomNode.roomHeight) return;
     
     // Simple door placement - distribute along walls
@@ -263,7 +262,7 @@ export class DungeonService {
   /**
    * Randomly place downward stairs in rooms
    */
-  private placeDownwardStairs(floorNodes: FloorDagNode[], dungeonNodeName: string): void {
+  private placeDownwardStairs(floorNodes: FloorDagNode[], _dungeonNodeName: string): void {
     const rooms = floorNodes.filter(node => node.isRoom);
     const stairCount = Math.floor(Math.random() * 2) + 1; // 1-2 stairs
     

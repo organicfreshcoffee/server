@@ -34,7 +34,7 @@ export async function authenticateToken(req: AuthenticatedRequest, res: Response
     const authService = new AuthService();
     const user = await authService.verifyToken(token);
     
-    console.log('[AuthMiddleware] AuthService.verifyToken result:', !!user ? 'SUCCESS' : 'FAILED');
+    console.log('[AuthMiddleware] AuthService.verifyToken result:', user ? 'SUCCESS' : 'FAILED');
     
     if (!user) {
       console.log('[AuthMiddleware] Token verification failed, returning 403');
