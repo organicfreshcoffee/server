@@ -2,12 +2,12 @@ import { getDatabase } from '../config/database';
 import { DungeonDagNode, FloorDagNode, FloorLayout, RoomStairs } from '../types/game';
 
 export class DungeonService {
-  private readonly ROOM_COUNT_MIN = 5;
-  private readonly ROOM_COUNT_MAX = 10;
+  private readonly ROOM_COUNT_MIN = 10;
+  private readonly ROOM_COUNT_MAX = 20;
   private readonly ROOM_SIZE_MIN = 8;
   private readonly ROOM_SIZE_MAX = 20;
-  private readonly HALLWAY_LENGTH_MIN = 15;
-  private readonly HALLWAY_LENGTH_MAX = 30;
+  private readonly HALLWAY_LENGTH_MIN = 30;
+  private readonly HALLWAY_LENGTH_MAX = 50;
   private readonly GENERATION_BUFFER = 3; // Generate floors when player is within 3 levels
 
   /**
@@ -159,7 +159,7 @@ export class DungeonService {
       return;
     }
 
-    const childrenCount = Math.floor(Math.random() * 3) + 1; // 1-3 children
+    const childrenCount = Math.floor(Math.random() * 6) + 2; // 2-6 children
     const children: string[] = [];
 
     for (let i = 0; i < childrenCount && roomCount.count < targetRoomCount; i++) {
