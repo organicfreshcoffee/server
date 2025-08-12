@@ -42,3 +42,49 @@ export interface WebSocketClient {
   isAuthenticated: boolean;
   lastPing: Date;
 }
+
+// Dungeon Generation Types
+export interface DungeonDagNode {
+  name: string; // Primary key
+  children: string[]; // Names of child nodes
+  isDownwardsFromParent: boolean; // true if stair from parent to self is down stair
+  isBossLevel: boolean; // if true and zero children, don't regenerate children
+}
+
+export interface FloorDagNode {
+  name: string; // Primary key
+  dungeonDagNodeName: string; // Foreign key to DungeonDagNode
+  children: string[]; // Names of child nodes
+  isRoom: boolean; // true if room, false if hallway
+  hasUpwardStair?: boolean; // null if hallway
+  hasDownwardStair?: boolean; // null if hallway
+  stairFloorDagName?: string; // reference to the room that the stair goes to
+  stairDungeonDagName?: string; // reference to the floor that the stair goes to
+  stairLocationX?: number; // width location of the stair if room has stair
+  stairLocationY?: number; // height location of the stair if room has stair
+  parentDirection?: 'left' | 'right' | 'center'; // direction relative to parent
+  parentDoorOffset?: number; // offset along the side for doors (1 to min(width,height)-1)
+  hallwayLength?: number; // length of hallway if hallway node
+  roomWidth?: number; // width of room if room node
+  roomHeight?: number; // height of room if room node
+}
+
+export interface FloorLayout {
+  dungeonDagNodeName: string;
+  nodes: FloorDagNode[];
+}
+
+export interface RoomStairs {
+  upwardStair?: {
+    floorDagNodeName: string;
+    dungeonDagNodeName: string;
+    locationX: number;
+    locationY: number;
+  };
+  downwardStair?: {
+    floorDagNodeName: string;
+    dungeonDagNodeName: string;
+    locationX: number;
+    locationY: number;
+  };
+}
