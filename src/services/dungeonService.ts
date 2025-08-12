@@ -35,7 +35,7 @@ export class DungeonService {
     await this.generateDungeonChildren(rootDungeonNode);
     
     // Get all current nodes and generate a few more levels
-    let allNodes = await db.collection('dungeonDagNodes').find({}).toArray() as unknown as DungeonDagNode[];
+    let allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
     
     // Generate 2-3 more levels to start with
     for (let level = 0; level < 2; level++) {
@@ -46,7 +46,7 @@ export class DungeonService {
       }
       
       // Refresh the nodes list
-      allNodes = await db.collection('dungeonDagNodes').find({}).toArray() as unknown as DungeonDagNode[];
+      allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
     }
 
     const totalFloors = allNodes.length;
@@ -60,7 +60,7 @@ export class DungeonService {
     const db = getDatabase();
     
     // Get all existing dungeon nodes
-    const allNodes = await db.collection('dungeonDagNodes').find({}).toArray() as unknown as DungeonDagNode[];
+    const allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
     
     // Calculate depths of all floors
     const depthMap = this.calculateDepths(allNodes);
@@ -334,6 +334,7 @@ export class DungeonService {
     
     const nodes = await db.collection('floorDagNodes')
       .find({ dungeonDagNodeName })
+      .limit(0) // 0 means no limit - get all results
       .toArray() as unknown as FloorDagNode[];
     
     if (nodes.length === 0) {
@@ -389,7 +390,7 @@ export class DungeonService {
     const db = getDatabase();
     
     // Find the root node (shortest name, typically 'A')
-    const nodes = await db.collection('dungeonDagNodes').find({}).toArray() as unknown as DungeonDagNode[];
+    const nodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
     
     if (nodes.length === 0) {
       return null;
