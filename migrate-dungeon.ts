@@ -5,10 +5,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 async function runMigration(): Promise<void> {
-  // Use the same MongoDB URI as the Docker server (port 27018)
-  const uri = 'mongodb://admin:password@localhost:27018/gamedb?authSource=admin';
-  
-  console.log('Using MongoDB URI: mongodb://admin:***@localhost:27018/gamedb?authSource=admin');
+  // Use MongoDB URI from environment variable or fallback to default
+  const uri = process.env.MONGODB_URI || 'mongodb://admin:password@localhost:27018/gamedb?authSource=admin';
 
   const client = new MongoClient(uri);
   
