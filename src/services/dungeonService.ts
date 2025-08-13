@@ -300,16 +300,27 @@ export class DungeonService {
    * Generate a room node
    */
   private generateRoomNode(name: string, dungeonNodeName: string, hasUpwardStair: boolean): FloorDagNode {
-    return {
+    const roomWidth = Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN;
+    const roomHeight = Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN;
+    
+    const room: FloorDagNode = {
       name,
       dungeonDagNodeName: dungeonNodeName,
       children: [],
       isRoom: true,
       hasUpwardStair,
       hasDownwardStair: false, // Will be set later
-      roomWidth: Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN,
-      roomHeight: Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN
+      roomWidth,
+      roomHeight
     };
+    
+    // Set stair location coordinates when hasUpwardStair is true
+    if (hasUpwardStair) {
+      room.stairLocationX = Math.floor(Math.random() * roomWidth);
+      room.stairLocationY = Math.floor(Math.random() * roomHeight);
+    }
+    
+    return room;
   }
 
   /**
@@ -356,7 +367,8 @@ export class DungeonService {
     
     for (let i = 0; i < Math.min(stairCount, rooms.length); i++) {
       const room = rooms[Math.floor(Math.random() * rooms.length)];
-      if (!room.hasDownwardStair) {
+      // Ensure a room can only have either upward OR downward stairs, not both
+      if (!room.hasDownwardStair && !room.hasUpwardStair) {
         room.hasDownwardStair = true;
         room.stairLocationX = Math.floor(Math.random() * (room.roomWidth || 10));
         room.stairLocationY = Math.floor(Math.random() * (room.roomHeight || 10));
