@@ -11,6 +11,7 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "migrate:dungeon": "npx ts-node migrate-dungeon.ts",
+    "delete:dungeon": "npx ts-node delete-dungeon.ts",
     "test:dungeon": "npx ts-node test-dungeon.ts"
   },
   "dependencies": {
