@@ -1,13 +1,18 @@
 import { getDatabase } from '../config/database';
 import { DungeonDagNode, FloorDagNode, FloorLayout, RoomStairs } from '../types/game';
 
+/**
+ * DungeonService manages the procedural generation of dungeon structures using two separate DAGs:
+ * 1. Dungeon DAG: Represents the overall dungeon structure with floors connected by stairs
+ * 2. Floor DAG: Represents the room/hallway layout within each individual floor
+ */
 export class DungeonService {
-  private readonly ROOM_COUNT_MIN = 10;
-  private readonly ROOM_COUNT_MAX = 20;
-  private readonly ROOM_SIZE_MIN = 8;
-  private readonly ROOM_SIZE_MAX = 20;
-  private readonly HALLWAY_LENGTH_MIN = 30;
-  private readonly HALLWAY_LENGTH_MAX = 50;
+  private readonly ROOM_COUNT_MIN = 5;
+  private readonly ROOM_COUNT_MAX = 15;
+  private readonly ROOM_SIZE_MIN = 5;
+  private readonly ROOM_SIZE_MAX = 15;
+  private readonly HALLWAY_LENGTH_MIN = 15;
+  private readonly HALLWAY_LENGTH_MAX = 30;
   private readonly GENERATION_BUFFER = 3; // Generate floors when player is within 3 levels
 
   /**
@@ -29,28 +34,10 @@ export class DungeonService {
     };
 
     await db.collection('dungeonDagNodes').insertOne(rootDungeonNode);
-    await this.generateFloor(rootDungeonNode.name, true); // Root floor with upward stair
+    await this.generateFloor(rootDungeonNode.name, true, 0, 12); // Root floor with upward stair, max depth 12
 
-    // Generate children for root using the same random logic
-    await this.generateDungeonChildren(rootDungeonNode);
-    
-    // Get all current nodes and generate a few more levels
-    let allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
-    
-    // Generate 2-3 more levels to start with
-    for (let level = 0; level < 2; level++) {
-      const leafNodes = allNodes.filter(node => node.children.length === 0);
-      
-      for (const leafNode of leafNodes) {
-        await this.generateDungeonChildren(leafNode);
-      }
-      
-      // Refresh the nodes list
-      allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
-    }
-
-    const totalFloors = allNodes.length;
-    console.log(`Dungeon initialized with ${totalFloors} floors`);
+    // eslint-disable-next-line no-console
+    console.log('Dungeon initialized with root floor A');
   }
 
   /**
@@ -72,21 +59,31 @@ export class DungeonService {
       deepestPlayerLevel = Math.max(deepestPlayerLevel, playerDepth);
     }
 
-    // Find leaf nodes (nodes with no children) that aren't boss levels
+    // Find leaf nodes (nodes with no children) that aren't boss levels and are close to players
     const leafNodes = allNodes.filter(node => 
       node.children.length === 0 && 
       !node.isBossLevel &&
       (depthMap[node.name] || 0) <= deepestPlayerLevel + this.GENERATION_BUFFER
     );
 
-    // Generate children for leaf nodes that are close to players
-    for (const leafNode of leafNodes) {
-      await this.generateDungeonChildren(leafNode);
+    if (leafNodes.length > 0) {
+      // Use balanced generation for nearby leaf nodes
+      const nodeQueue = leafNodes.map(node => ({ 
+        node, 
+        depth: depthMap[node.name] || 0 
+      }));
+      
+      const currentNodeCount = allNodes.length;
+      const generatedCount = { count: currentNodeCount };
+      const maxNodes = currentNodeCount + 10; // Limit additional nodes
+      const maxDepth = deepestPlayerLevel + this.GENERATION_BUFFER + 3;
+      
+      await this.generateDungeonRecursive(nodeQueue, maxDepth, generatedCount, maxNodes);
     }
   }
 
   /**
-   * Generate children for a dungeon node
+   * Generate children for a dungeon node using balanced exploration
    */
   private async generateDungeonChildren(parentNode: DungeonDagNode): Promise<void> {
     const db = getDatabase();
@@ -118,9 +115,23 @@ export class DungeonService {
   }
 
   /**
+   * Recursively generate dungeon structure with balanced exploration
+   */
+  private async generateDungeonRecursive(
+    _nodeQueue: { node: DungeonDagNode; depth: number }[],
+    _maxDepth: number,
+    _generatedCount: { count: number },
+    _maxNodes: number
+  ): Promise<void> {
+    // The recursive generation is now handled within generateFloor -> placeDownwardStairsAndCreateChildren
+    // This method is kept for compatibility but the actual generation happens during floor creation
+    return;
+  }
+
+  /**
    * Generate a floor layout
    */
-  private async generateFloor(dungeonNodeName: string, hasUpwardStair: boolean): Promise<void> {
+  private async generateFloor(dungeonNodeName: string, hasUpwardStair: boolean, depth: number = 0, maxDepth: number = 12): Promise<void> {
     const db = getDatabase();
     
     // Generate root room
@@ -131,21 +142,24 @@ export class DungeonService {
     const roomCount = { count: 1 }; // Use object to pass by reference
     
     // Generate root room
-    const rootRoom = this.generateRoomNode(rootRoomName, dungeonNodeName, hasUpwardStair);
+    const rootRoom = await this.generateRoomNode(rootRoomName, dungeonNodeName, hasUpwardStair);
     floorNodes.push(rootRoom);
     
     // Generate floor recursively
     await this.generateFloorRecursive(rootRoom, dungeonNodeName, floorNodes, roomCount, targetRoomCount);
     
-    // Randomly place downward stairs in rooms
-    this.placeDownwardStairs(floorNodes, dungeonNodeName);
-    
-    // Insert all floor nodes
+    // Insert all floor nodes first before creating children
     await db.collection('floorDagNodes').insertMany(floorNodes);
+    
+    // Only create child floors if we haven't reached max depth
+    if (depth < maxDepth) {
+      // Randomly place downward stairs in rooms and create child dungeon nodes
+      await this.placeDownwardStairsAndCreateChildren(floorNodes, dungeonNodeName, depth, maxDepth);
+    }
   }
 
   /**
-   * Recursively generate floor nodes
+   * Recursively generate floor nodes with balanced exploration
    */
   private async generateFloorRecursive(
     parentNode: FloorDagNode,
@@ -158,52 +172,69 @@ export class DungeonService {
       return;
     }
 
-    const childrenCount = Math.floor(Math.random() * 6) + 2; // 2-6 children
-    const children: string[] = [];
-
-    for (let i = 0; i < childrenCount && roomCount.count < targetRoomCount; i++) {
-      const childName = this.generateChildName(parentNode.name, i);
-      children.push(childName);
-
-      let childNode: FloorDagNode;
-
-      if (parentNode.isRoom) {
-        // Parent is room, child is hallway
-        childNode = this.generateHallwayNode(childName, dungeonNodeName);
-        childNode.parentDirection = this.getRandomDirection();
-        // Calculate parentDoorOffset for hallway connecting to room
-        const parentMinSide = Math.min(parentNode.roomWidth || 8, parentNode.roomHeight || 8);
-        childNode.parentDoorOffset = Math.floor(Math.random() * Math.max(1, parentMinSide - 1)) + 1;
-        // Set door location on parent room (this would be more sophisticated in a real implementation)
-        this.setDoorLocation(parentNode, i, childrenCount);
-      } else {
-        // Parent is hallway, child can be room or hallway
-        const isRoom = Math.random() < 0.7; // 70% chance of room
-        
-        if (isRoom) {
-          childNode = this.generateRoomNode(childName, dungeonNodeName, false);
-          roomCount.count++;
-          // Calculate parentDoorOffset as random number from 1 to min(width, height) - 1
-          const minSide = Math.min(childNode.roomWidth || 8, childNode.roomHeight || 8);
-          childNode.parentDoorOffset = Math.floor(Math.random() * Math.max(1, minSide - 1)) + 1;
-          childNode.parentDirection = this.getRandomDirection();
-        } else {
-          childNode = this.generateHallwayNode(childName, dungeonNodeName);
-          childNode.parentDirection = this.getRandomDirection();
+    // Use a queue for breadth-first generation to ensure balanced exploration
+    const nodeQueue: FloorDagNode[] = [parentNode];
+    
+    while (nodeQueue.length > 0 && roomCount.count < targetRoomCount) {
+      // Process nodes level by level for balanced exploration
+      const currentLevelSize = nodeQueue.length;
+      const nodesToProcess = nodeQueue.splice(0, currentLevelSize);
+      
+      for (const currentNode of nodesToProcess) {
+        if (roomCount.count >= targetRoomCount) {
+          break;
         }
-      }
+        
+        // Generate children for current node
+        const childrenCount = Math.floor(Math.random() * 4) + 1; // 1-4 children for better balance
+        const children: string[] = [];
+        
+        // Decrease chance of generation as we get closer to target
+        const remainingRooms = targetRoomCount - roomCount.count;
+        const generationChance = Math.min(0.8, remainingRooms / (targetRoomCount * 0.3));
+        
+        if (Math.random() > generationChance && roomCount.count > targetRoomCount * 0.5) {
+          continue; // Skip generation for this node occasionally to create variation
+        }
 
-      floorNodes.push(childNode);
-    }
+        for (let i = 0; i < childrenCount && roomCount.count < targetRoomCount; i++) {
+          const childName = this.generateChildName(currentNode.name, i);
+          children.push(childName);
 
-    // Update parent with children
-    parentNode.children = children;
+          let childNode: FloorDagNode;
 
-    // Now recurse for each child
-    for (const childName of children) {
-      const childNode = floorNodes.find(node => node.name === childName);
-      if (childNode && roomCount.count < targetRoomCount) {
-        await this.generateFloorRecursive(childNode, dungeonNodeName, floorNodes, roomCount, targetRoomCount);
+          if (currentNode.isRoom) {
+            // Parent is room, child is hallway
+            childNode = this.generateHallwayNode(childName, dungeonNodeName);
+            childNode.parentDirection = this.getRandomDirection();
+            // Calculate parentDoorOffset for hallway connecting to room
+            const parentMinSide = Math.min(currentNode.roomWidth || 8, currentNode.roomHeight || 8);
+            childNode.parentDoorOffset = Math.floor(Math.random() * Math.max(1, parentMinSide - 1)) + 1;
+            // Set door location on parent room
+            this.setDoorLocation(currentNode, i, childrenCount);
+          } else {
+            // Parent is hallway, child can be room or hallway
+            const isRoom = Math.random() < 0.6; // 60% chance of room (slightly less to prevent too many rooms)
+            
+            if (isRoom) {
+              childNode = await this.generateRoomNode(childName, dungeonNodeName, false);
+              roomCount.count++;
+              // Calculate parentDoorOffset as random number from 1 to min(width, height) - 1
+              const minSide = Math.min(childNode.roomWidth || 8, childNode.roomHeight || 8);
+              childNode.parentDoorOffset = Math.floor(Math.random() * Math.max(1, minSide - 1)) + 1;
+              childNode.parentDirection = this.getRandomDirection();
+            } else {
+              childNode = this.generateHallwayNode(childName, dungeonNodeName);
+              childNode.parentDirection = this.getRandomDirection();
+            }
+          }
+
+          floorNodes.push(childNode);
+          nodeQueue.push(childNode); // Add to queue for next level processing
+        }
+
+        // Update parent with children
+        currentNode.children = children;
       }
     }
   }
@@ -211,17 +242,47 @@ export class DungeonService {
   /**
    * Generate a room node
    */
-  private generateRoomNode(name: string, dungeonNodeName: string, hasUpwardStair: boolean): FloorDagNode {
-    return {
+  private async generateRoomNode(name: string, dungeonNodeName: string, hasUpwardStair: boolean): Promise<FloorDagNode> {
+    const roomWidth = Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN;
+    const roomHeight = Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN;
+    
+    const room: FloorDagNode = {
       name,
       dungeonDagNodeName: dungeonNodeName,
       children: [],
       isRoom: true,
       hasUpwardStair,
       hasDownwardStair: false, // Will be set later
-      roomWidth: Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN,
-      roomHeight: Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN
+      roomWidth,
+      roomHeight
     };
+    
+    // Set stair location coordinates and connections when hasUpwardStair is true
+    if (hasUpwardStair) {
+      room.stairLocationX = Math.floor(Math.random() * roomWidth);
+      room.stairLocationY = Math.floor(Math.random() * roomHeight);
+      
+      // Find parent dungeon node to set up upward stair connection
+      const db = getDatabase();
+      const currentDungeonNode = await db.collection('dungeonDagNodes')
+        .findOne({ name: dungeonNodeName }) as unknown as DungeonDagNode | null;
+      
+      if (currentDungeonNode?.parentFloorDagNodeName) {
+        // The upward stair connects to the parent room that has the downward stair
+        room.stairFloorDagName = currentDungeonNode.parentFloorDagNodeName;
+        
+        // Find the parent floor node to get the parent dungeon name
+        const parentFloorNode = await db.collection('floorDagNodes')
+          .findOne({ name: currentDungeonNode.parentFloorDagNodeName }) as unknown as FloorDagNode | null;
+        
+        if (parentFloorNode) {
+          // The upward stair leads to the parent dungeon (not the current one)
+          room.stairDungeonDagName = parentFloorNode.dungeonDagNodeName;
+        }
+      }
+    }
+    
+    return room;
   }
 
   /**
@@ -260,20 +321,69 @@ export class DungeonService {
   }
 
   /**
-   * Randomly place downward stairs in rooms
+   * Randomly place downward stairs in rooms and create child dungeon nodes
    */
-  private placeDownwardStairs(floorNodes: FloorDagNode[], _dungeonNodeName: string): void {
+  private async placeDownwardStairsAndCreateChildren(floorNodes: FloorDagNode[], dungeonNodeName: string, depth: number, maxDepth: number): Promise<void> {
+    const db = getDatabase();
     const rooms = floorNodes.filter(node => node.isRoom);
     const stairCount = Math.floor(Math.random() * 2) + 1; // 1-2 stairs
+    const childrenNames: string[] = [];
+    const roomsToUpdate: FloorDagNode[] = [];
     
     for (let i = 0; i < Math.min(stairCount, rooms.length); i++) {
       const room = rooms[Math.floor(Math.random() * rooms.length)];
-      if (!room.hasDownwardStair) {
+      // Ensure a room can only have either upward OR downward stairs, not both
+      if (!room.hasDownwardStair && !room.hasUpwardStair) {
+        // Create child dungeon node
+        const childName = this.generateChildName(dungeonNodeName, i);
+        childrenNames.push(childName);
+        
+        const childNode: DungeonDagNode = {
+          name: childName,
+          children: [],
+          isDownwardsFromParent: true,
+          isBossLevel: Math.random() < 0.1, // 10% chance of boss level
+          parentFloorDagNodeName: room.name
+        };
+        
+        await db.collection('dungeonDagNodes').insertOne(childNode);
+        
+        // Set up the downward stair in the room
         room.hasDownwardStair = true;
         room.stairLocationX = Math.floor(Math.random() * (room.roomWidth || 10));
         room.stairLocationY = Math.floor(Math.random() * (room.roomHeight || 10));
-        // stairDungeonDagName will be set when the child dungeon node is created
+        room.stairDungeonDagName = childName;
+        room.stairFloorDagName = `${childName}_A`; // Child floor's root room
+        
+        roomsToUpdate.push(room);
+        
+        // Generate the child floor with upward stair - pass depth + 1
+        await this.generateFloor(childName, true, depth + 1, maxDepth);
       }
+    }
+    
+    // Update parent dungeon node with children
+    if (childrenNames.length > 0) {
+      await db.collection('dungeonDagNodes').updateOne(
+        { name: dungeonNodeName },
+        { $set: { children: childrenNames } }
+      );
+    }
+    
+    // Update the rooms in the database with stair information
+    for (const room of roomsToUpdate) {
+      await db.collection('floorDagNodes').updateOne(
+        { name: room.name },
+        { 
+          $set: { 
+            hasDownwardStair: room.hasDownwardStair,
+            stairLocationX: room.stairLocationX,
+            stairLocationY: room.stairLocationY,
+            stairDungeonDagName: room.stairDungeonDagName,
+            stairFloorDagName: room.stairFloorDagName
+          } 
+        }
+      );
     }
   }
 
@@ -362,15 +472,39 @@ export class DungeonService {
     
     const stairs: RoomStairs = {};
     
+    // Handle upward stairs
     if (room.hasUpwardStair && room.stairLocationX !== undefined && room.stairLocationY !== undefined) {
-      stairs.upwardStair = {
-        floorDagNodeName: room.stairFloorDagName || '',
-        dungeonDagNodeName: room.stairDungeonDagName || '',
-        locationX: room.stairLocationX,
-        locationY: room.stairLocationY
-      };
+      // If the room already has stair connection info, use it
+      if (room.stairFloorDagName && room.stairDungeonDagName) {
+        stairs.upwardStair = {
+          floorDagNodeName: room.stairFloorDagName,
+          dungeonDagNodeName: room.stairDungeonDagName,
+          locationX: room.stairLocationX,
+          locationY: room.stairLocationY
+        };
+      } else {
+        // For root rooms, find parent through dungeon node relationships
+        const currentDungeonNode = await db.collection('dungeonDagNodes')
+          .findOne({ name: room.dungeonDagNodeName }) as unknown as DungeonDagNode | null;
+        
+        if (currentDungeonNode?.parentFloorDagNodeName) {
+          // Find the parent floor node to get the parent dungeon name
+          const parentFloorNode = await db.collection('floorDagNodes')
+            .findOne({ name: currentDungeonNode.parentFloorDagNodeName }) as unknown as FloorDagNode | null;
+          
+          if (parentFloorNode) {
+            stairs.upwardStair = {
+              floorDagNodeName: currentDungeonNode.parentFloorDagNodeName,
+              dungeonDagNodeName: parentFloorNode.dungeonDagNodeName,
+              locationX: room.stairLocationX,
+              locationY: room.stairLocationY
+            };
+          }
+        }
+      }
     }
     
+    // Handle downward stairs
     if (room.hasDownwardStair && room.stairLocationX !== undefined && room.stairLocationY !== undefined) {
       stairs.downwardStair = {
         floorDagNodeName: room.stairFloorDagName || '',
@@ -380,7 +514,7 @@ export class DungeonService {
       };
     }
     
-    return stairs;
+    return Object.keys(stairs).length > 0 ? stairs : null;
   }
 
   /**
