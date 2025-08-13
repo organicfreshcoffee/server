@@ -147,14 +147,14 @@ export class DungeonService {
     // Generate floor recursively
     await this.generateFloorRecursive(rootRoom, dungeonNodeName, floorNodes, roomCount, targetRoomCount);
     
+    // Insert all floor nodes first before creating children
+    await db.collection('floorDagNodes').insertMany(floorNodes);
+    
     // Only create child floors if we haven't reached max depth
     if (depth < maxDepth) {
       // Randomly place downward stairs in rooms and create child dungeon nodes
       await this.placeDownwardStairsAndCreateChildren(floorNodes, dungeonNodeName, depth, maxDepth);
     }
-    
-    // Insert all floor nodes
-    await db.collection('floorDagNodes').insertMany(floorNodes);
   }
 
   /**
@@ -267,12 +267,15 @@ export class DungeonService {
         .findOne({ name: dungeonNodeName }) as unknown as DungeonDagNode | null;
       
       if (currentDungeonNode?.parentFloorDagNodeName) {
+        // The upward stair connects to the parent room that has the downward stair
         room.stairFloorDagName = currentDungeonNode.parentFloorDagNodeName;
-        // Find the parent dungeon node name by looking up the parent floor's dungeon
+        
+        // Find the parent floor node to get the parent dungeon name
         const parentFloorNode = await db.collection('floorDagNodes')
           .findOne({ name: currentDungeonNode.parentFloorDagNodeName }) as unknown as FloorDagNode | null;
         
         if (parentFloorNode) {
+          // The upward stair leads to the parent dungeon (not the current one)
           room.stairDungeonDagName = parentFloorNode.dungeonDagNodeName;
         }
       }
@@ -324,6 +327,7 @@ export class DungeonService {
     const rooms = floorNodes.filter(node => node.isRoom);
     const stairCount = Math.floor(Math.random() * 2) + 1; // 1-2 stairs
     const childrenNames: string[] = [];
+    const roomsToUpdate: FloorDagNode[] = [];
     
     for (let i = 0; i < Math.min(stairCount, rooms.length); i++) {
       const room = rooms[Math.floor(Math.random() * rooms.length)];
@@ -350,6 +354,8 @@ export class DungeonService {
         room.stairDungeonDagName = childName;
         room.stairFloorDagName = `${childName}_A`; // Child floor's root room
         
+        roomsToUpdate.push(room);
+        
         // Generate the child floor with upward stair - pass depth + 1
         await this.generateFloor(childName, true, depth + 1, maxDepth);
       }
@@ -360,6 +366,22 @@ export class DungeonService {
       await db.collection('dungeonDagNodes').updateOne(
         { name: dungeonNodeName },
         { $set: { children: childrenNames } }
+      );
+    }
+    
+    // Update the rooms in the database with stair information
+    for (const room of roomsToUpdate) {
+      await db.collection('floorDagNodes').updateOne(
+        { name: room.name },
+        { 
+          $set: { 
+            hasDownwardStair: room.hasDownwardStair,
+            stairLocationX: room.stairLocationX,
+            stairLocationY: room.stairLocationY,
+            stairDungeonDagName: room.stairDungeonDagName,
+            stairFloorDagName: room.stairFloorDagName
+          } 
+        }
       );
     }
   }
@@ -451,12 +473,34 @@ export class DungeonService {
     
     // Handle upward stairs
     if (room.hasUpwardStair && room.stairLocationX !== undefined && room.stairLocationY !== undefined) {
-      stairs.upwardStair = {
-        floorDagNodeName: room.stairFloorDagName || '',
-        dungeonDagNodeName: room.stairDungeonDagName || '',
-        locationX: room.stairLocationX,
-        locationY: room.stairLocationY
-      };
+      // If the room already has stair connection info, use it
+      if (room.stairFloorDagName && room.stairDungeonDagName) {
+        stairs.upwardStair = {
+          floorDagNodeName: room.stairFloorDagName,
+          dungeonDagNodeName: room.stairDungeonDagName,
+          locationX: room.stairLocationX,
+          locationY: room.stairLocationY
+        };
+      } else {
+        // For root rooms, find parent through dungeon node relationships
+        const currentDungeonNode = await db.collection('dungeonDagNodes')
+          .findOne({ name: room.dungeonDagNodeName }) as unknown as DungeonDagNode | null;
+        
+        if (currentDungeonNode?.parentFloorDagNodeName) {
+          // Find the parent floor node to get the parent dungeon name
+          const parentFloorNode = await db.collection('floorDagNodes')
+            .findOne({ name: currentDungeonNode.parentFloorDagNodeName }) as unknown as FloorDagNode | null;
+          
+          if (parentFloorNode) {
+            stairs.upwardStair = {
+              floorDagNodeName: currentDungeonNode.parentFloorDagNodeName,
+              dungeonDagNodeName: parentFloorNode.dungeonDagNodeName,
+              locationX: room.stairLocationX,
+              locationY: room.stairLocationY
+            };
+          }
+        }
+      }
     }
     
     // Handle downward stairs
