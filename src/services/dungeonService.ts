@@ -174,8 +174,11 @@ export class DungeonService {
 
     // Use a queue for breadth-first generation to ensure balanced exploration
     const nodeQueue: FloorDagNode[] = [parentNode];
+    let iterationCount = 0;
+    const maxIterations = targetRoomCount * 10; // Safety limit to prevent infinite loops
     
-    while (nodeQueue.length > 0 && roomCount.count < targetRoomCount) {
+    while (nodeQueue.length > 0 && roomCount.count < targetRoomCount && iterationCount < maxIterations) {
+      iterationCount++;
       // Process nodes level by level for balanced exploration
       const currentLevelSize = nodeQueue.length;
       const nodesToProcess = nodeQueue.splice(0, currentLevelSize);
@@ -214,7 +217,10 @@ export class DungeonService {
             this.setDoorLocation(currentNode, i, childrenCount);
           } else {
             // Parent is hallway, child can be room or hallway
-            const isRoom = Math.random() < 0.6; // 60% chance of room (slightly less to prevent too many rooms)
+            // Force room generation if we're running low on iterations and need more rooms
+            const remainingRooms = targetRoomCount - roomCount.count;
+            const forceRoom = remainingRooms > 0 && iterationCount > maxIterations * 0.7;
+            const isRoom = forceRoom || Math.random() < 0.6; // 60% chance of room, or forced if needed
             
             if (isRoom) {
               childNode = await this.generateRoomNode(childName, dungeonNodeName, false);
