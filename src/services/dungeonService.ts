@@ -36,6 +36,7 @@ export class DungeonService {
     await db.collection('dungeonDagNodes').insertOne(rootDungeonNode);
     await this.generateFloor(rootDungeonNode.name, true, 0, 12); // Root floor with upward stair, max depth 12
 
+    // eslint-disable-next-line no-console
     console.log('Dungeon initialized with root floor A');
   }
 
@@ -117,10 +118,10 @@ export class DungeonService {
    * Recursively generate dungeon structure with balanced exploration
    */
   private async generateDungeonRecursive(
-    nodeQueue: { node: DungeonDagNode; depth: number }[],
-    maxDepth: number,
-    generatedCount: { count: number },
-    maxNodes: number
+    _nodeQueue: { node: DungeonDagNode; depth: number }[],
+    _maxDepth: number,
+    _generatedCount: { count: number },
+    _maxNodes: number
   ): Promise<void> {
     // The recursive generation is now handled within generateFloor -> placeDownwardStairsAndCreateChildren
     // This method is kept for compatibility but the actual generation happens during floor creation
