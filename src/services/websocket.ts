@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage } from 'http';
 import { v4 as uuidv4 } from 'uuid';
@@ -282,131 +283,7 @@ interface ConnectData {
   dungeonDagNodeName?: string; // Initial floor
 }
 
-// Legacy handleConnect function - kept for backward compatibility
-// Note: This is no longer used with URL parameter authentication
-async function handleConnect(clientId: string, data: ConnectData): Promise<void> {
-  const client = clients.get(clientId);
-  if (!client) {
-    return;
-  }
 
-  console.log(`Handling connect for client ${clientId} with data:`, JSON.stringify(data, null, 2));
-
-  try {
-    let userId: string | null = null;
-    let userEmail: string | null = null;
-    let userName: string | null = null;
-
-    // Check for Firebase token first (preferred method)
-    const token = data.token || data.authToken;
-    if (token) {
-      console.log(`Attempting token verification for client ${clientId}`);
-      const user = await authService.verifyToken(token);
-      if (user) {
-        userId = user.uid;
-        userEmail = user.email || null;
-        userName = user.name || null;
-        console.log(`Token verification successful for user: ${userId}`);
-      } else {
-        console.log(`Token verification failed for client ${clientId}`);
-      }
-    }
-    
-    // Fallback: use userId and userEmail directly (for development)
-    if (!userId && (data.userId || data.playerId)) {
-      console.log(`Using fallback authentication for client ${clientId}`);
-      userId = data.userId || data.playerId || null;
-      userEmail = data.userEmail || null;
-      userName = data.userName || (userEmail ? userEmail.split('@')[0] : 'Player');
-    }
-
-    // If we have a valid user ID, proceed with authentication
-    if (userId) {
-      client.userId = userId;
-      client.isAuthenticated = true;
-
-      // Get or create player
-      let player = await playerService.getPlayer(userId);
-      if (!player) {
-        const displayName = userName || (userEmail ? userEmail.split('@')[0] : 'Player');
-        player = await playerService.createPlayer(userId, displayName, userEmail || undefined);
-        console.log(`Created new player: ${displayName} (${userId})`);
-      } else {
-        console.log(`Found existing player: ${player.username} (${userId})`);
-      }
-
-      // Update player position and rotation if provided in connect data
-      if (data.position && typeof data.position.x === 'number' && typeof data.position.y === 'number' && typeof data.position.z === 'number') {
-        player.position = data.position;
-        
-        if (data.rotation && typeof data.rotation.x === 'number' && typeof data.rotation.y === 'number' && typeof data.rotation.z === 'number') {
-          player.rotation = data.rotation;
-          await playerService.updatePlayerPositionAndRotation(userId, data.position, data.rotation);
-          console.log(`Updated player position and rotation:`, data.position, data.rotation);
-        } else {
-          await playerService.updatePlayerPosition(userId, data.position);
-          console.log(`Updated player position to:`, data.position);
-        }
-      }
-
-      // Set player online
-      await playerService.setPlayerOnlineStatus(userId, true);
-      client.playerId = player.id;
-      gameState.players.set(player.id, player);
-
-      // Handle floor assignment - use provided floor or default to 'A' (root floor)
-      const initialFloor = data.dungeonDagNodeName || player.currentDungeonDagNodeName || 'A';
-      player.currentDungeonDagNodeName = initialFloor;
-      addClientToFloor(clientId, initialFloor);
-      
-      // Update player's floor in database if it's different from stored value
-      const storedPlayer = await playerService.getPlayer(userId);
-      if (storedPlayer && player.currentDungeonDagNodeName !== storedPlayer.currentDungeonDagNodeName) {
-        await playerService.updatePlayerFloor(userId, initialFloor);
-      }
-
-      // Send success response with floor-specific data
-      sendMessage(clientId, {
-        type: 'connect_success',
-        data: {
-          player, // Send full player data to the connecting user
-          gameState: {
-            players: getPlayersOnFloor(initialFloor), // Only players on the same floor
-            gameStarted: gameState.gameStarted,
-          },
-        },
-      });
-
-      // Send current players list for this floor to the new client
-      const playersOnFloor = getPlayersOnFloor(initialFloor)
-        .filter(p => p.id !== player.id);
-
-      if (playersOnFloor.length > 0) {
-        sendMessage(clientId, {
-          type: 'players_list',
-          data: {
-            players: playersOnFloor,
-            floor: initialFloor,
-          },
-        });
-      }
-
-      // Broadcast player joined to other clients on the same floor
-      broadcastToFloorExcluding(initialFloor, clientId, {
-        type: 'player_joined',
-        data: createSafePlayerData(player),
-      });
-
-      console.log(`Player connected successfully: ${player.username} (${userId})`);
-    } else {
-      console.log(`Authentication failed for client ${clientId} - no valid credentials provided`);
-      sendErrorMessage(clientId, 'Authentication failed: Please provide a valid token or user credentials');
-    }
-  } catch (error) {
-    console.error(`Connect error for client ${clientId}:`, error);
-    sendErrorMessage(clientId, 'Connection failed due to server error');
-  }
-}
 
 async function handleAutoConnect(clientId: string, token: string): Promise<void> {
   const client = clients.get(clientId);
@@ -684,33 +561,9 @@ function sendErrorMessage(clientId: string, error: string): void {
   });
 }
 
-function broadcastToAll(message: GameMessage): void {
-  const messageWithTimestamp = {
-    ...message,
-    timestamp: new Date(),
-  };
-  const messageString = JSON.stringify(messageWithTimestamp);
 
-  clients.forEach((client) => {
-    if (client.ws.readyState === WebSocket.OPEN) {
-      client.ws.send(messageString);
-    }
-  });
-}
 
-function broadcastToOthers(excludeClientId: string, message: GameMessage): void {
-  const messageWithTimestamp = {
-    ...message,
-    timestamp: new Date(),
-  };
-  const messageString = JSON.stringify(messageWithTimestamp);
 
-  clients.forEach((client, clientId) => {
-    if (clientId !== excludeClientId && client.ws.readyState === WebSocket.OPEN) {
-      client.ws.send(messageString);
-    }
-  });
-}
 
 function broadcastGameState(): void {
   if (gameState.players.size === 0) {
