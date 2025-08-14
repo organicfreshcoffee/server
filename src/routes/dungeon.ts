@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { DungeonService } from '../services/dungeonService';
+import { changePlayerFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -15,6 +16,15 @@ router.use(authenticateToken);
 router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promise<void> => {
   try {
     const { newFloorName } = req.body;
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
 
     if (!newFloorName || typeof newFloorName !== 'string') {
       res.status(400).json({
@@ -27,13 +37,25 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
     // In a real implementation, you'd get all player levels from the database
     // For now, we'll assume this single player's floor
     const playerLevels = [newFloorName];
-
+    
+    // Trigger procedural generation if needed
     await dungeonService.checkAndGenerateFloors(newFloorName, playerLevels);
 
-    res.json({
-      success: true,
-      message: 'Floor generation checked and updated if needed'
-    });
+    // Change player's floor (handles WebSocket room management and notifications)
+    const result = await changePlayerFloor(userId, newFloorName);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Floor generation checked and updated if needed. Player floor changed.',
+        floor: newFloorName
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.message
+      });
+    }
   } catch (error) {
     console.error('Error in player-moved-floor:', error);
     res.status(500).json({
@@ -42,6 +64,11 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
     });
   }
 });
+
+/**
+ * Get dungeon layout for a specific floor
+ * GET /api/dungeon/floor/:floorName
+ */
 
 /**
  * Get floor layout for rendering

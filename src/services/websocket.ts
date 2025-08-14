@@ -235,10 +235,6 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
         await handlePlayerAction(clientId, message.data as unknown as ActionData);
         break;
 
-      case 'change_floor':
-        await handleFloorChange(clientId, message.data as unknown as FloorChangeData);
-        break;
-
       case 'ping':
         handlePing(clientId);
         break;
@@ -263,10 +259,6 @@ interface ConnectData {
   position?: Position;
   rotation?: Position;
   dungeonDagNodeName?: string; // Initial floor
-}
-
-interface FloorChangeData {
-  dungeonDagNodeName: string; // New floor name
 }
 
 async function handleConnect(clientId: string, data: ConnectData): Promise<void> {
@@ -390,76 +382,6 @@ async function handleConnect(clientId: string, data: ConnectData): Promise<void>
   } catch (error) {
     console.error(`Connect error for client ${clientId}:`, error);
     sendErrorMessage(clientId, 'Connection failed due to server error');
-  }
-}
-
-async function handleFloorChange(clientId: string, data: FloorChangeData): Promise<void> {
-  const client = clients.get(clientId);
-  if (!client || !client.isAuthenticated || !client.userId || !client.playerId) {
-    sendErrorMessage(clientId, 'Not authenticated');
-    return;
-  }
-
-  try {
-    const { dungeonDagNodeName } = data;
-    if (!dungeonDagNodeName || typeof dungeonDagNodeName !== 'string') {
-      sendErrorMessage(clientId, 'Invalid floor name');
-      return;
-    }
-
-    const oldFloor = client.currentDungeonDagNodeName;
-    
-    // Update player's floor in database
-    await playerService.updatePlayerFloor(client.userId, dungeonDagNodeName);
-    
-    // Update game state
-    const player = gameState.players.get(client.playerId);
-    if (player) {
-      player.currentDungeonDagNodeName = dungeonDagNodeName;
-    }
-    
-    // Move client to new floor room
-    moveClientToFloor(clientId, dungeonDagNodeName);
-    
-    // Notify old floor that player left
-    if (oldFloor) {
-      broadcastToFloor(oldFloor, {
-        type: 'player_left_floor',
-        data: { 
-          playerId: client.playerId,
-          fromFloor: oldFloor,
-          toFloor: dungeonDagNodeName,
-        },
-      });
-    }
-    
-    // Send new floor data to the client
-    const playersOnNewFloor = getPlayersOnFloor(dungeonDagNodeName)
-      .filter(p => p.id !== client.playerId);
-    
-    sendMessage(clientId, {
-      type: 'floor_changed',
-      data: {
-        newFloor: dungeonDagNodeName,
-        oldFloor: oldFloor,
-        players: playersOnNewFloor,
-      },
-    });
-    
-    // Notify new floor that player joined
-    broadcastToFloorExcluding(dungeonDagNodeName, clientId, {
-      type: 'player_joined_floor',
-      data: {
-        ...createSafePlayerData(player!),
-        fromFloor: oldFloor,
-        toFloor: dungeonDagNodeName,
-      },
-    });
-    
-    console.log(`Player ${client.playerId} changed from floor ${oldFloor} to ${dungeonDagNodeName}`);
-  } catch (error) {
-    console.error('Floor change error:', error);
-    sendErrorMessage(clientId, 'Error changing floor');
   }
 }
 
@@ -717,4 +639,70 @@ function cleanupInactiveClients(): void {
       handleDisconnect(clientId);
     }
   });
+}
+
+// Export function for REST endpoints to trigger floor changes
+export async function changePlayerFloor(userId: string, newFloorName: string): Promise<{ success: boolean; message: string }> {
+  try {
+    // Find client by userId
+    let targetClient: WebSocketClient | null = null;
+    let targetClientId: string | null = null;
+    
+    for (const [clientId, client] of clients.entries()) {
+      if (client.userId === userId) {
+        targetClient = client;
+        targetClientId = clientId;
+        break;
+      }
+    }
+    
+    if (!targetClient || !targetClientId) {
+      return { success: false, message: 'Player not connected via WebSocket' };
+    }
+    
+    const oldFloor = targetClient.currentDungeonDagNodeName;
+    
+    // Update player's floor in database
+    await playerService.updatePlayerFloor(userId, newFloorName);
+    
+    // Update game state
+    const player = gameState.players.get(targetClient.playerId!);
+    if (player) {
+      player.currentDungeonDagNodeName = newFloorName;
+    }
+    
+    // Move client to new floor room
+    moveClientToFloor(targetClientId, newFloorName);
+    
+    // Notify old floor that player left
+    if (oldFloor) {
+      broadcastToFloor(oldFloor, {
+        type: 'player_left_floor',
+        data: { 
+          playerId: targetClient.playerId,
+          fromFloor: oldFloor,
+          toFloor: newFloorName,
+        },
+      });
+    }
+    
+    // Notify new floor that player joined
+    if (player) {
+      broadcastToFloorExcluding(newFloorName, targetClientId, {
+        type: 'player_joined_floor',
+        data: {
+          ...createSafePlayerData(player),
+          fromFloor: oldFloor,
+          toFloor: newFloorName,
+        },
+      });
+    }
+    
+    console.log(`Player ${targetClient.playerId} changed from floor ${oldFloor} to ${newFloorName} via REST`);
+    return { success: true, message: `Floor changed from ${oldFloor} to ${newFloorName}` };
+    
+  } catch (error) {
+    console.error('REST floor change error:', error);
+    return { success: false, message: 'Error changing floor' };
+  }
 }
