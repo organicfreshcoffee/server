@@ -1,4 +1,5 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import { IncomingMessage } from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthService } from './authService';
 import { PlayerService } from './playerService';
@@ -167,7 +168,7 @@ function getPlayersOnFloor(dungeonDagNodeName: string): Partial<Player>[] {
 }
 
 export function setupWebSocketServer(wss: WebSocketServer): void {
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', async (ws: WebSocket, req: IncomingMessage) => {
     const clientId = uuidv4();
     const client: WebSocketClient = {
       id: clientId,
@@ -178,6 +179,31 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
 
     clients.set(clientId, client);
     console.log(`New WebSocket connection: ${clientId}`);
+
+    // Parse URL parameters for authentication
+    const url = new URL(req.url!, `http://${req.headers.host}`);
+    const encodedToken = url.searchParams.get('token');
+    const dungeonDagNodeName = url.searchParams.get('floor') || 'A'; // Default to root floor
+
+    // Decode the token safely
+    const token = encodedToken ? decodeURIComponent(encodedToken) : null;
+
+    // Authenticate immediately on connection
+    if (token) {
+      try {
+        await handleAutoConnect(clientId, token, dungeonDagNodeName);
+      } catch (error) {
+        console.error(`Auto-authentication failed for client ${clientId}:`, error);
+        sendErrorMessage(clientId, 'Authentication failed. Please check your token.');
+        ws.close(1008, 'Authentication failed');
+        return;
+      }
+    } else {
+      console.log(`No token provided for client ${clientId}`);
+      sendErrorMessage(clientId, 'Authentication token required. Please connect with ?token=your-token');
+      ws.close(1008, 'Token required');
+      return;
+    }
 
     // Set up message handling
     ws.on('message', async (data: Buffer) => {
@@ -223,10 +249,6 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
 
   try {
     switch (message.type) {
-      case 'connect':
-        await handleConnect(clientId, message.data as unknown as ConnectData);
-        break;
-
       case 'player_move':
         await handlePlayerMove(clientId, message.data as unknown as MoveData);
         break;
@@ -261,6 +283,8 @@ interface ConnectData {
   dungeonDagNodeName?: string; // Initial floor
 }
 
+// Legacy handleConnect function - kept for backward compatibility
+// Note: This is no longer used with URL parameter authentication
 async function handleConnect(clientId: string, data: ConnectData): Promise<void> {
   const client = clients.get(clientId);
   if (!client) {
@@ -382,6 +406,95 @@ async function handleConnect(clientId: string, data: ConnectData): Promise<void>
   } catch (error) {
     console.error(`Connect error for client ${clientId}:`, error);
     sendErrorMessage(clientId, 'Connection failed due to server error');
+  }
+}
+
+async function handleAutoConnect(clientId: string, token: string, dungeonDagNodeName: string): Promise<void> {
+  const client = clients.get(clientId);
+  if (!client) {
+    throw new Error('Client not found');
+  }
+
+  console.log(`Auto-connecting client ${clientId} to floor ${dungeonDagNodeName} with token`);
+
+  try {
+    // Verify Firebase token
+    const user = await authService.verifyToken(token);
+    if (!user) {
+      throw new Error('Invalid token');
+    }
+
+    const userId = user.uid;
+    const userEmail = user.email || null;
+    const userName = user.name || null;
+
+    console.log(`Token verification successful for user: ${userId}`);
+
+    // Set client as authenticated
+    client.userId = userId;
+    client.isAuthenticated = true;
+
+    // Get or create player
+    let player = await playerService.getPlayer(userId);
+    if (!player) {
+      const displayName = userName || (userEmail ? userEmail.split('@')[0] : 'Player');
+      player = await playerService.createPlayer(userId, displayName, userEmail || undefined);
+      console.log(`Created new player: ${displayName} (${userId})`);
+    } else {
+      console.log(`Found existing player: ${player.username} (${userId})`);
+    }
+
+    // Set player online and assign to floor
+    await playerService.setPlayerOnlineStatus(userId, true);
+    client.playerId = player.id;
+    gameState.players.set(player.id, player);
+
+    // Handle floor assignment
+    player.currentDungeonDagNodeName = dungeonDagNodeName;
+    addClientToFloor(clientId, dungeonDagNodeName);
+    
+    // Update player's floor in database if different
+    const storedPlayer = await playerService.getPlayer(userId);
+    if (storedPlayer && player.currentDungeonDagNodeName !== storedPlayer.currentDungeonDagNodeName) {
+      await playerService.updatePlayerFloor(userId, dungeonDagNodeName);
+    }
+
+    // Send success response with floor-specific data
+    sendMessage(clientId, {
+      type: 'connect_success',
+      data: {
+        player, // Send full player data to the connecting user
+        gameState: {
+          players: getPlayersOnFloor(dungeonDagNodeName), // Only players on the same floor
+          gameStarted: gameState.gameStarted,
+        },
+      },
+    });
+
+    // Send current players list for this floor to the new client
+    const playersOnFloor = getPlayersOnFloor(dungeonDagNodeName)
+      .filter(p => p.id !== player.id);
+
+    if (playersOnFloor.length > 0) {
+      sendMessage(clientId, {
+        type: 'players_list',
+        data: {
+          players: playersOnFloor,
+          floor: dungeonDagNodeName,
+        },
+      });
+    }
+
+    // Broadcast player joined to other clients on the same floor
+    broadcastToFloorExcluding(dungeonDagNodeName, clientId, {
+      type: 'player_joined',
+      data: createSafePlayerData(player),
+    });
+
+    console.log(`Player auto-connected successfully: ${player.username} (${userId}) on floor ${dungeonDagNodeName}`);
+  } catch (error) {
+    console.error(`Auto-connect error for client ${clientId}:`, error);
+    throw error; // Re-throw so the connection handler can close the WebSocket
   }
 }
 
