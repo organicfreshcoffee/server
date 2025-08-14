@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { DungeonService } from '../services/dungeonService';
 import { PlayerService } from '../services/playerService';
-import { changePlayerFloor } from '../services/websocket';
+import { changePlayerFloor, getTotalPlayerCount, getPlayerCountsByFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
@@ -232,6 +232,31 @@ router.get('/spawn', async (req: AuthenticatedRequest, res): Promise<void> => {
     });
   } catch (error) {
     console.error('Error in get-spawn:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Get total player count across all floors
+ * GET /api/dungeon/player-count
+ */
+router.get('/player-count', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const totalPlayers = getTotalPlayerCount();
+    const playersByFloor = getPlayerCountsByFloor();
+
+    res.json({
+      success: true,
+      data: {
+        totalPlayers,
+        playersByFloor
+      }
+    });
+  } catch (error) {
+    console.error('Error in get-player-count:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'

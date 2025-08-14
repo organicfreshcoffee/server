@@ -654,3 +654,25 @@ export async function changePlayerFloor(userId: string, newFloorName: string): P
     return { success: false, message: 'Error changing floor' };
   }
 }
+
+/**
+ * Get the total number of players across all floors
+ */
+export function getTotalPlayerCount(): number {
+  let totalPlayers = 0;
+  floorClients.forEach((clientIds) => {
+    totalPlayers += clientIds.size;
+  });
+  return totalPlayers;
+}
+
+/**
+ * Get player counts by floor
+ */
+export function getPlayerCountsByFloor(): Record<string, number> {
+  const counts: Record<string, number> = {};
+  floorClients.forEach((clientIds, floorName) => {
+    counts[floorName] = clientIds.size;
+  });
+  return counts;
+}
