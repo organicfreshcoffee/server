@@ -1,12 +1,73 @@
 import { Router } from 'express';
 import { DungeonService } from '../services/dungeonService';
+import { PlayerService } from '../services/playerService';
+import { changePlayerFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
 const dungeonService = new DungeonService();
+const playerService = new PlayerService();
 
 // Apply authentication middleware to all dungeon routes
 router.use(authenticateToken);
+
+// Add logging for all dungeon routes
+router.use((req, res, next) => {
+  console.log(`[DungeonRoutes] ${req.method} ${req.path}`);
+  next();
+});
+
+/**
+ * Get the player's current floor
+ * GET /api/dungeon/current-floor
+ */
+router.get('/current-floor', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    console.log(`Current floor request for user: ${userId}`);
+
+    if (!userId) {
+      console.log('No userId found in request');
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    // Get player from database
+    console.log(`Looking up player for userId: ${userId}`);
+    const player = await playerService.getPlayer(userId);
+
+    if (!player) {
+      console.log(`Player not found for userId: ${userId}`);
+      res.status(404).json({
+        success: false,
+        error: 'Player not found'
+      });
+      return;
+    }
+
+    const currentFloor = player.currentDungeonDagNodeName || 'A'; // Default to root floor
+    console.log(`Found player ${player.username} on floor: ${currentFloor}`);
+
+    res.json({
+      success: true,
+      data: {
+        currentFloor: currentFloor,
+        playerId: player.id,
+        playerName: player.username
+      }
+    });
+    console.log(`Successfully returned current floor data for ${player.username}`);
+  } catch (error) {
+    console.error('Error in get-current-floor:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
 
 /**
  * Player moved to a new floor - check if we need to generate more floors
@@ -15,6 +76,15 @@ router.use(authenticateToken);
 router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promise<void> => {
   try {
     const { newFloorName } = req.body;
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
 
     if (!newFloorName || typeof newFloorName !== 'string') {
       res.status(400).json({
@@ -27,13 +97,25 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
     // In a real implementation, you'd get all player levels from the database
     // For now, we'll assume this single player's floor
     const playerLevels = [newFloorName];
-
+    
+    // Trigger procedural generation if needed
     await dungeonService.checkAndGenerateFloors(newFloorName, playerLevels);
 
-    res.json({
-      success: true,
-      message: 'Floor generation checked and updated if needed'
-    });
+    // Change player's floor (handles WebSocket room management and notifications)
+    const result = await changePlayerFloor(userId, newFloorName);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Floor generation checked and updated if needed. Player floor changed.',
+        floor: newFloorName
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.message
+      });
+    }
   } catch (error) {
     console.error('Error in player-moved-floor:', error);
     res.status(500).json({
@@ -42,6 +124,11 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
     });
   }
 });
+
+/**
+ * Get dungeon layout for a specific floor
+ * GET /api/dungeon/floor/:floorName
+ */
 
 /**
  * Get floor layout for rendering

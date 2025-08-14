@@ -19,6 +19,7 @@ export class PlayerService {
       experience: 0,
       lastUpdate: new Date(),
       isOnline: false,
+      currentDungeonDagNodeName: 'A', // Default to root floor
     };
 
     const result = await db.collection(this.collection).insertOne(player);
@@ -51,6 +52,7 @@ export class PlayerService {
       experience: player.experience,
       lastUpdate: player.lastUpdate,
       isOnline: player.isOnline,
+      currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
     };
   }
 
@@ -131,7 +133,22 @@ export class PlayerService {
       experience: player.experience,
       lastUpdate: player.lastUpdate,
       isOnline: player.isOnline,
+      currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
     }));
+  }
+
+  async updatePlayerFloor(userId: string, dungeonDagNodeName: string): Promise<void> {
+    const db = getDatabase();
+    
+    await db.collection(this.collection).updateOne(
+      { userId },
+      {
+        $set: {
+          currentDungeonDagNodeName: dungeonDagNodeName,
+          lastUpdate: new Date(),
+        },
+      }
+    );
   }
 
   async deletePlayer(userId: string): Promise<void> {
