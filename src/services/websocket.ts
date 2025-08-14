@@ -183,7 +183,6 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
     // Parse URL parameters for authentication
     const url = new URL(req.url!, `http://${req.headers.host}`);
     const encodedToken = url.searchParams.get('token');
-    const dungeonDagNodeName = url.searchParams.get('floor') || 'A'; // Default to root floor
 
     // Decode the token safely
     const token = encodedToken ? decodeURIComponent(encodedToken) : null;
@@ -191,7 +190,7 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
     // Authenticate immediately on connection
     if (token) {
       try {
-        await handleAutoConnect(clientId, token, dungeonDagNodeName);
+        await handleAutoConnect(clientId, token);
       } catch (error) {
         console.error(`Auto-authentication failed for client ${clientId}:`, error);
         sendErrorMessage(clientId, 'Authentication failed. Please check your token.');
@@ -409,13 +408,13 @@ async function handleConnect(clientId: string, data: ConnectData): Promise<void>
   }
 }
 
-async function handleAutoConnect(clientId: string, token: string, dungeonDagNodeName: string): Promise<void> {
+async function handleAutoConnect(clientId: string, token: string): Promise<void> {
   const client = clients.get(clientId);
   if (!client) {
     throw new Error('Client not found');
   }
 
-  console.log(`Auto-connecting client ${clientId} to floor ${dungeonDagNodeName} with token`);
+  console.log(`Auto-connecting client ${clientId} with token`);
 
   try {
     // Verify Firebase token
@@ -444,20 +443,15 @@ async function handleAutoConnect(clientId: string, token: string, dungeonDagNode
       console.log(`Found existing player: ${player.username} (${userId})`);
     }
 
-    // Set player online and assign to floor
+    // Set player online
     await playerService.setPlayerOnlineStatus(userId, true);
     client.playerId = player.id;
     gameState.players.set(player.id, player);
 
-    // Handle floor assignment
-    player.currentDungeonDagNodeName = dungeonDagNodeName;
-    addClientToFloor(clientId, dungeonDagNodeName);
-    
-    // Update player's floor in database if different
-    const storedPlayer = await playerService.getPlayer(userId);
-    if (storedPlayer && player.currentDungeonDagNodeName !== storedPlayer.currentDungeonDagNodeName) {
-      await playerService.updatePlayerFloor(userId, dungeonDagNodeName);
-    }
+    // Use player's current floor from database (defaults to 'A' if not set)
+    const currentFloor = player.currentDungeonDagNodeName || 'A';
+    player.currentDungeonDagNodeName = currentFloor;
+    addClientToFloor(clientId, currentFloor);
 
     // Send success response with floor-specific data
     sendMessage(clientId, {
@@ -465,14 +459,14 @@ async function handleAutoConnect(clientId: string, token: string, dungeonDagNode
       data: {
         player, // Send full player data to the connecting user
         gameState: {
-          players: getPlayersOnFloor(dungeonDagNodeName), // Only players on the same floor
+          players: getPlayersOnFloor(currentFloor), // Only players on the same floor
           gameStarted: gameState.gameStarted,
         },
       },
     });
 
     // Send current players list for this floor to the new client
-    const playersOnFloor = getPlayersOnFloor(dungeonDagNodeName)
+    const playersOnFloor = getPlayersOnFloor(currentFloor)
       .filter(p => p.id !== player.id);
 
     if (playersOnFloor.length > 0) {
@@ -480,18 +474,18 @@ async function handleAutoConnect(clientId: string, token: string, dungeonDagNode
         type: 'players_list',
         data: {
           players: playersOnFloor,
-          floor: dungeonDagNodeName,
+          floor: currentFloor,
         },
       });
     }
 
     // Broadcast player joined to other clients on the same floor
-    broadcastToFloorExcluding(dungeonDagNodeName, clientId, {
+    broadcastToFloorExcluding(currentFloor, clientId, {
       type: 'player_joined',
       data: createSafePlayerData(player),
     });
 
-    console.log(`Player auto-connected successfully: ${player.username} (${userId}) on floor ${dungeonDagNodeName}`);
+    console.log(`Player auto-connected successfully: ${player.username} (${userId}) on floor ${currentFloor}`);
   } catch (error) {
     console.error(`Auto-connect error for client ${clientId}:`, error);
     throw error; // Re-throw so the connection handler can close the WebSocket
