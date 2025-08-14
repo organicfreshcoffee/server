@@ -1,13 +1,61 @@
 import { Router } from 'express';
 import { DungeonService } from '../services/dungeonService';
+import { PlayerService } from '../services/playerService';
 import { changePlayerFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
 const dungeonService = new DungeonService();
+const playerService = new PlayerService();
 
 // Apply authentication middleware to all dungeon routes
 router.use(authenticateToken);
+
+/**
+ * Get the player's current floor
+ * GET /api/dungeon/current-floor
+ */
+router.get('/current-floor', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    // Get player from database
+    const player = await playerService.getPlayer(userId);
+
+    if (!player) {
+      res.status(404).json({
+        success: false,
+        error: 'Player not found'
+      });
+      return;
+    }
+
+    const currentFloor = player.currentDungeonDagNodeName || 'A'; // Default to root floor
+
+    res.json({
+      success: true,
+      data: {
+        currentFloor: currentFloor,
+        playerId: player.id,
+        playerName: player.username
+      }
+    });
+  } catch (error) {
+    console.error('Error in get-current-floor:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
 
 /**
  * Player moved to a new floor - check if we need to generate more floors
