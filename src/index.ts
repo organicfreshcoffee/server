@@ -9,6 +9,7 @@ import { connectToDatabase } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
 import { setupWebSocketServer } from './services/websocket';
 import dungeonRoutes from './routes/dungeon';
+import userRoutes from './routes/user';
 import { DungeonService } from './services/dungeonService';
 
 // Load environment variables
@@ -46,6 +47,7 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/dungeon', dungeonRoutes);
+app.use('/api/user', userRoutes);
 
 // Error handling middleware
 app.use(errorHandler);

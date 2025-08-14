@@ -56,6 +56,32 @@ export class PlayerService {
     };
   }
 
+  async getPlayerByEmail(email: string): Promise<Player | null> {
+    const db = getDatabase();
+    
+    const player = await db.collection(this.collection).findOne({ email });
+    
+    if (!player) {
+      return null;
+    }
+
+    return {
+      id: player._id.toString(),
+      userId: player.userId,
+      username: player.username,
+      email: player.email,
+      position: player.position,
+      rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
+      health: player.health,
+      maxHealth: player.maxHealth,
+      level: player.level,
+      experience: player.experience,
+      lastUpdate: player.lastUpdate,
+      isOnline: player.isOnline,
+      currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
+    };
+  }
+
   async updatePlayerPosition(userId: string, position: Position): Promise<void> {
     const db = getDatabase();
     
