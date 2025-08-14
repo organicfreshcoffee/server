@@ -7,6 +7,8 @@ import { GameMessage, WebSocketClient, GameState, Player, Position } from '../ty
 const authService = new AuthService();
 const playerService = new PlayerService();
 const clients = new Map<string, WebSocketClient>();
+// Track clients by floor for efficient broadcasting
+const floorClients = new Map<string, Set<string>>(); // dungeonDagNodeName -> Set of clientIds
 const gameState: GameState = {
   players: new Map<string, Player>(),
   gameStarted: true,
@@ -49,8 +51,119 @@ function createSafePlayerData(player: Player): Partial<Player> {
     experience: player.experience,
     lastUpdate: player.lastUpdate,
     isOnline: player.isOnline,
+    currentDungeonDagNodeName: player.currentDungeonDagNodeName,
     // Explicitly exclude userId, username, and email
   };
+}
+
+// Floor management functions
+function addClientToFloor(clientId: string, dungeonDagNodeName: string): void {
+  if (!floorClients.has(dungeonDagNodeName)) {
+    floorClients.set(dungeonDagNodeName, new Set());
+  }
+  floorClients.get(dungeonDagNodeName)!.add(clientId);
+  
+  const client = clients.get(clientId);
+  if (client) {
+    client.currentDungeonDagNodeName = dungeonDagNodeName;
+  }
+}
+
+function removeClientFromFloor(clientId: string, dungeonDagNodeName?: string): void {
+  const client = clients.get(clientId);
+  const floorName = dungeonDagNodeName || client?.currentDungeonDagNodeName;
+  
+  if (floorName && floorClients.has(floorName)) {
+    floorClients.get(floorName)!.delete(clientId);
+    
+    // Clean up empty floor rooms to prevent memory leaks
+    if (floorClients.get(floorName)!.size === 0) {
+      floorClients.delete(floorName);
+      console.log(`Cleaned up empty floor room: ${floorName}`);
+    }
+  }
+  
+  if (client) {
+    client.currentDungeonDagNodeName = undefined;
+  }
+}
+
+function moveClientToFloor(clientId: string, newDungeonDagNodeName: string): void {
+  const client = clients.get(clientId);
+  const oldFloor = client?.currentDungeonDagNodeName;
+  
+  // Remove from old floor
+  if (oldFloor) {
+    removeClientFromFloor(clientId, oldFloor);
+  }
+  
+  // Add to new floor
+  addClientToFloor(clientId, newDungeonDagNodeName);
+  
+  console.log(`Client ${clientId} moved from floor ${oldFloor || 'none'} to ${newDungeonDagNodeName}`);
+}
+
+// Floor-based broadcasting functions
+function broadcastToFloor(dungeonDagNodeName: string, message: GameMessage): void {
+  const messageWithTimestamp = {
+    ...message,
+    timestamp: new Date(),
+  };
+  const messageString = JSON.stringify(messageWithTimestamp);
+  
+  const floorClientIds = floorClients.get(dungeonDagNodeName);
+  if (!floorClientIds) {
+    return; // No clients on this floor
+  }
+  
+  floorClientIds.forEach((clientId) => {
+    const client = clients.get(clientId);
+    if (client && client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(messageString);
+    }
+  });
+}
+
+function broadcastToFloorExcluding(dungeonDagNodeName: string, excludeClientId: string, message: GameMessage): void {
+  const messageWithTimestamp = {
+    ...message,
+    timestamp: new Date(),
+  };
+  const messageString = JSON.stringify(messageWithTimestamp);
+  
+  const floorClientIds = floorClients.get(dungeonDagNodeName);
+  if (!floorClientIds) {
+    return; // No clients on this floor
+  }
+  
+  floorClientIds.forEach((clientId) => {
+    if (clientId !== excludeClientId) {
+      const client = clients.get(clientId);
+      if (client && client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(messageString);
+      }
+    }
+  });
+}
+
+function getPlayersOnFloor(dungeonDagNodeName: string): Partial<Player>[] {
+  const floorClientIds = floorClients.get(dungeonDagNodeName);
+  if (!floorClientIds) {
+    return [];
+  }
+  
+  const playersOnFloor: Partial<Player>[] = [];
+  floorClientIds.forEach((clientId) => {
+    const client = clients.get(clientId);
+    if (client && client.playerId) {
+      const player = gameState.players.get(client.playerId);
+      if (player) {
+        playersOnFloor.push(createSafePlayerData(player));
+      }
+    }
+  });
+  
+  return playersOnFloor;
 }
 
 export function setupWebSocketServer(wss: WebSocketServer): void {
@@ -122,6 +235,10 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
         await handlePlayerAction(clientId, message.data as unknown as ActionData);
         break;
 
+      case 'change_floor':
+        await handleFloorChange(clientId, message.data as unknown as FloorChangeData);
+        break;
+
       case 'ping':
         handlePing(clientId);
         break;
@@ -145,6 +262,11 @@ interface ConnectData {
   userName?: string;
   position?: Position;
   rotation?: Position;
+  dungeonDagNodeName?: string; // Initial floor
+}
+
+interface FloorChangeData {
+  dungeonDagNodeName: string; // New floor name
 }
 
 async function handleConnect(clientId: string, data: ConnectData): Promise<void> {
@@ -217,36 +339,47 @@ async function handleConnect(clientId: string, data: ConnectData): Promise<void>
       client.playerId = player.id;
       gameState.players.set(player.id, player);
 
-      // Send success response
+      // Handle floor assignment - use provided floor or default to 'A' (root floor)
+      const initialFloor = data.dungeonDagNodeName || player.currentDungeonDagNodeName || 'A';
+      player.currentDungeonDagNodeName = initialFloor;
+      addClientToFloor(clientId, initialFloor);
+      
+      // Update player's floor in database if it's different from stored value
+      const storedPlayer = await playerService.getPlayer(userId);
+      if (storedPlayer && player.currentDungeonDagNodeName !== storedPlayer.currentDungeonDagNodeName) {
+        await playerService.updatePlayerFloor(userId, initialFloor);
+      }
+
+      // Send success response with floor-specific data
       sendMessage(clientId, {
         type: 'connect_success',
         data: {
           player, // Send full player data to the connecting user
           gameState: {
-            players: Array.from(gameState.players.values()).map(createSafePlayerData), // Send safe data for others
+            players: getPlayersOnFloor(initialFloor), // Only players on the same floor
             gameStarted: gameState.gameStarted,
           },
         },
       });
 
-      // Send current players list to the new client
-      const otherPlayers = Array.from(gameState.players.values())
-        .filter(p => p.id !== player.id)
-        .map(createSafePlayerData); // Use safe data for other players
+      // Send current players list for this floor to the new client
+      const playersOnFloor = getPlayersOnFloor(initialFloor)
+        .filter(p => p.id !== player.id);
 
-      if (otherPlayers.length > 0) {
+      if (playersOnFloor.length > 0) {
         sendMessage(clientId, {
           type: 'players_list',
           data: {
-            players: otherPlayers // Already using safe data
+            players: playersOnFloor,
+            floor: initialFloor,
           },
         });
       }
 
-      // Broadcast player joined to other clients
-      broadcastToOthers(clientId, {
+      // Broadcast player joined to other clients on the same floor
+      broadcastToFloorExcluding(initialFloor, clientId, {
         type: 'player_joined',
-        data: createSafePlayerData(player), // Use safe data when broadcasting to others
+        data: createSafePlayerData(player),
       });
 
       console.log(`Player connected successfully: ${player.username} (${userId})`);
@@ -257,6 +390,76 @@ async function handleConnect(clientId: string, data: ConnectData): Promise<void>
   } catch (error) {
     console.error(`Connect error for client ${clientId}:`, error);
     sendErrorMessage(clientId, 'Connection failed due to server error');
+  }
+}
+
+async function handleFloorChange(clientId: string, data: FloorChangeData): Promise<void> {
+  const client = clients.get(clientId);
+  if (!client || !client.isAuthenticated || !client.userId || !client.playerId) {
+    sendErrorMessage(clientId, 'Not authenticated');
+    return;
+  }
+
+  try {
+    const { dungeonDagNodeName } = data;
+    if (!dungeonDagNodeName || typeof dungeonDagNodeName !== 'string') {
+      sendErrorMessage(clientId, 'Invalid floor name');
+      return;
+    }
+
+    const oldFloor = client.currentDungeonDagNodeName;
+    
+    // Update player's floor in database
+    await playerService.updatePlayerFloor(client.userId, dungeonDagNodeName);
+    
+    // Update game state
+    const player = gameState.players.get(client.playerId);
+    if (player) {
+      player.currentDungeonDagNodeName = dungeonDagNodeName;
+    }
+    
+    // Move client to new floor room
+    moveClientToFloor(clientId, dungeonDagNodeName);
+    
+    // Notify old floor that player left
+    if (oldFloor) {
+      broadcastToFloor(oldFloor, {
+        type: 'player_left_floor',
+        data: { 
+          playerId: client.playerId,
+          fromFloor: oldFloor,
+          toFloor: dungeonDagNodeName,
+        },
+      });
+    }
+    
+    // Send new floor data to the client
+    const playersOnNewFloor = getPlayersOnFloor(dungeonDagNodeName)
+      .filter(p => p.id !== client.playerId);
+    
+    sendMessage(clientId, {
+      type: 'floor_changed',
+      data: {
+        newFloor: dungeonDagNodeName,
+        oldFloor: oldFloor,
+        players: playersOnNewFloor,
+      },
+    });
+    
+    // Notify new floor that player joined
+    broadcastToFloorExcluding(dungeonDagNodeName, clientId, {
+      type: 'player_joined_floor',
+      data: {
+        ...createSafePlayerData(player!),
+        fromFloor: oldFloor,
+        toFloor: dungeonDagNodeName,
+      },
+    });
+    
+    console.log(`Player ${client.playerId} changed from floor ${oldFloor} to ${dungeonDagNodeName}`);
+  } catch (error) {
+    console.error('Floor change error:', error);
+    sendErrorMessage(clientId, 'Error changing floor');
   }
 }
 
@@ -334,10 +537,16 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
       broadcastData.movementDirection = movementDirection;
     }
 
-    broadcastToOthers(clientId, {
-      type: 'player_moved',
-      data: broadcastData,
-    });
+    // Broadcast position update only to other clients on the same floor
+    const currentFloor = client.currentDungeonDagNodeName;
+    if (currentFloor) {
+      broadcastToFloorExcluding(currentFloor, clientId, {
+        type: 'player_moved',
+        data: broadcastData,
+      });
+    } else {
+      console.warn(`Player ${client.playerId} moving but not assigned to any floor`);
+    }
   } catch (error) {
     console.error('Player move error:', error);
     sendErrorMessage(clientId, 'Error updating position');
@@ -360,15 +569,20 @@ async function handlePlayerAction(clientId: string, data: ActionData): Promise<v
   // Handle different player actions (attack, interact, etc.)
   console.log(`Player action from ${clientId}:`, data);
   
-  // Broadcast action to other clients
-  broadcastToOthers(clientId, {
-    type: 'player_action',
-    data: {
-      playerId: client.playerId,
-      action: data,
-      timestamp: new Date(),
-    },
-  });
+  // Broadcast action only to other clients on the same floor
+  const currentFloor = client.currentDungeonDagNodeName;
+  if (currentFloor) {
+    broadcastToFloorExcluding(currentFloor, clientId, {
+      type: 'player_action',
+      data: {
+        playerId: client.playerId,
+        action: data,
+        timestamp: new Date(),
+      },
+    });
+  } else {
+    console.warn(`Player ${client.playerId} performing action but not assigned to any floor`);
+  }
 }
 
 function handlePing(clientId: string): void {
@@ -400,11 +614,20 @@ async function handleDisconnect(clientId: string): Promise<void> {
           gameState.players.delete(client.playerId);
         }
 
-        // Broadcast player left to other clients
-        broadcastToOthers(clientId, {
-          type: 'player_left',
-          data: { playerId: client.playerId },
-        });
+        // Remove client from their floor and notify others on that floor
+        const currentFloor = client.currentDungeonDagNodeName;
+        if (currentFloor) {
+          removeClientFromFloor(clientId, currentFloor);
+          
+          // Broadcast player left to other clients on the same floor
+          broadcastToFloor(currentFloor, {
+            type: 'player_left',
+            data: { 
+              playerId: client.playerId,
+              floor: currentFloor,
+            },
+          });
+        }
       } catch (error) {
         console.error('Error handling disconnect:', error);
       }
@@ -465,13 +688,21 @@ function broadcastGameState(): void {
     return;
   }
 
-  broadcastToAll({
-    type: 'game_state',
-    data: {
-      players: Array.from(gameState.players.values()).map(createSafePlayerData), // Use safe data
-      gameStarted: gameState.gameStarted,
-      lastUpdate: gameState.lastUpdate,
-    },
+  // Broadcast floor-specific game state to each floor
+  floorClients.forEach((clientIds, dungeonDagNodeName) => {
+    if (clientIds.size > 0) {
+      const playersOnFloor = getPlayersOnFloor(dungeonDagNodeName);
+      
+      broadcastToFloor(dungeonDagNodeName, {
+        type: 'game_state',
+        data: {
+          players: playersOnFloor,
+          gameStarted: gameState.gameStarted,
+          lastUpdate: gameState.lastUpdate,
+          floor: dungeonDagNodeName,
+        },
+      });
+    }
   });
 }
 

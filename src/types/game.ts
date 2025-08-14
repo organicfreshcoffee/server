@@ -13,6 +13,7 @@ export interface Player {
   experience: number;
   lastUpdate: Date;
   isOnline: boolean;
+  currentDungeonDagNodeName?: string; // Current floor/level in dungeon
 }
 
 export interface Position {
@@ -41,6 +42,7 @@ export interface WebSocketClient {
   playerId?: string;
   isAuthenticated: boolean;
   lastPing: Date;
+  currentDungeonDagNodeName?: string; // Current floor/level in dungeon
 }
 
 // Dungeon Generation Types
