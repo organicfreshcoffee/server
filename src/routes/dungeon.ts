@@ -11,6 +11,12 @@ const playerService = new PlayerService();
 // Apply authentication middleware to all dungeon routes
 router.use(authenticateToken);
 
+// Add logging for all dungeon routes
+router.use((req, res, next) => {
+  console.log(`[DungeonRoutes] ${req.method} ${req.path}`);
+  next();
+});
+
 /**
  * Get the player's current floor
  * GET /api/dungeon/current-floor
@@ -18,8 +24,10 @@ router.use(authenticateToken);
 router.get('/current-floor', async (req: AuthenticatedRequest, res): Promise<void> => {
   try {
     const userId = req.user?.uid;
+    console.log(`Current floor request for user: ${userId}`);
 
     if (!userId) {
+      console.log('No userId found in request');
       res.status(401).json({
         success: false,
         error: 'User not authenticated'
@@ -28,9 +36,11 @@ router.get('/current-floor', async (req: AuthenticatedRequest, res): Promise<voi
     }
 
     // Get player from database
+    console.log(`Looking up player for userId: ${userId}`);
     const player = await playerService.getPlayer(userId);
 
     if (!player) {
+      console.log(`Player not found for userId: ${userId}`);
       res.status(404).json({
         success: false,
         error: 'Player not found'
@@ -39,6 +49,7 @@ router.get('/current-floor', async (req: AuthenticatedRequest, res): Promise<voi
     }
 
     const currentFloor = player.currentDungeonDagNodeName || 'A'; // Default to root floor
+    console.log(`Found player ${player.username} on floor: ${currentFloor}`);
 
     res.json({
       success: true,
@@ -48,6 +59,7 @@ router.get('/current-floor', async (req: AuthenticatedRequest, res): Promise<voi
         playerName: player.username
       }
     });
+    console.log(`Successfully returned current floor data for ${player.username}`);
   } catch (error) {
     console.error('Error in get-current-floor:', error);
     res.status(500).json({
