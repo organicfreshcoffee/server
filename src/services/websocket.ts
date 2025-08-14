@@ -271,18 +271,6 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
   }
 }
 
-interface ConnectData {
-  token?: string;
-  authToken?: string;
-  userId?: string;
-  playerId?: string;
-  userEmail?: string;
-  userName?: string;
-  position?: Position;
-  rotation?: Position;
-  dungeonDagNodeName?: string; // Initial floor
-}
-
 
 
 async function handleAutoConnect(clientId: string, token: string): Promise<void> {
