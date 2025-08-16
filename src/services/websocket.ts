@@ -492,6 +492,7 @@ interface ActionData {
   action: string;
   target?: string;
   data?: Record<string, unknown>;
+  playerId?: string; // Firebase user ID that may be included by client
 }
 
 async function handlePlayerAction(clientId: string, data: ActionData): Promise<void> {
@@ -504,14 +505,35 @@ async function handlePlayerAction(clientId: string, data: ActionData): Promise<v
   // Handle different player actions (attack, interact, etc.)
   console.log(`Player action from ${clientId}:`, data);
   
+  // Sanitize action data to remove Firebase user IDs before broadcasting
+  const sanitizedAction: Partial<ActionData> = { ...data };
+  
+  // Remove any playerId field from the action data (this would be the Firebase ID)
+  if ('playerId' in sanitizedAction) {
+    console.log(`Removing Firebase playerId from action data: ${sanitizedAction.playerId}`);
+    delete sanitizedAction.playerId;
+  }
+  
+  // Also check nested data object for playerId
+  if (sanitizedAction.data && typeof sanitizedAction.data === 'object') {
+    const sanitizedData = { ...sanitizedAction.data };
+    if ('playerId' in sanitizedData) {
+      console.log(`Removing Firebase playerId from nested action data: ${sanitizedData.playerId}`);
+      delete sanitizedData.playerId;
+    }
+    sanitizedAction.data = sanitizedData;
+  }
+  
+  console.log(`Broadcasting sanitized action with MongoDB playerId: ${client.playerId}`);
+  
   // Broadcast action only to other clients on the same floor
   const currentFloor = client.currentDungeonDagNodeName;
   if (currentFloor) {
     broadcastToFloorExcluding(currentFloor, clientId, {
       type: 'player_action',
       data: {
-        playerId: client.playerId,
-        action: data,
+        playerId: client.playerId, // Use MongoDB player ID (safe to expose)
+        action: sanitizedAction, // Use sanitized action data
         timestamp: new Date(),
       },
     });
