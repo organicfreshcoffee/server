@@ -46,6 +46,7 @@ export class PlayerService {
       email: player.email,
       position: player.position,
       rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
+      character: player.character, // Character appearance/customization data
       health: player.health,
       maxHealth: player.maxHealth,
       level: player.level,
@@ -72,6 +73,7 @@ export class PlayerService {
       email: player.email,
       position: player.position,
       rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
+      character: player.character, // Character appearance/customization data
       health: player.health,
       maxHealth: player.maxHealth,
       level: player.level,
@@ -107,6 +109,35 @@ export class PlayerService {
           rotation,
           lastUpdate: new Date(),
         },
+      }
+    );
+  }
+
+  async updatePlayerPositionRotationAndCharacter(userId: string, position: Position, rotation?: Position, character?: Record<string, unknown>): Promise<void> {
+    const db = getDatabase();
+    
+    const updateData: {
+      position: Position;
+      lastUpdate: Date;
+      rotation?: Position;
+      character?: Record<string, unknown>;
+    } = {
+      position,
+      lastUpdate: new Date(),
+    };
+    
+    if (rotation) {
+      updateData.rotation = rotation;
+    }
+    
+    if (character) {
+      updateData.character = character;
+    }
+    
+    await db.collection(this.collection).updateOne(
+      { userId },
+      {
+        $set: updateData,
       }
     );
   }

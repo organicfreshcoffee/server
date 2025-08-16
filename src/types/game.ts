@@ -7,6 +7,7 @@ export interface Player {
   email?: string;
   position: Position;
   rotation: Position; // Rotation in x, y, z axes
+  character?: Record<string, unknown>; // Character appearance/customization data
   health: number;
   maxHealth: number;
   level: number;
