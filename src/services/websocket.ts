@@ -41,12 +41,23 @@ function canSendMovementUpdate(clientId: string): boolean {
   return true;
 }
 
+// Helper function to find existing client by player ID
+function findClientByPlayerId(playerId: string): string | null {
+  for (const [clientId, client] of clients.entries()) {
+    if (client.playerId === playerId) {
+      return clientId;
+    }
+  }
+  return null;
+}
+
 // Helper function to create safe player data for broadcasting (removes sensitive info)
 function createSafePlayerData(player: Player): Partial<Player> {
   return {
     id: player.id,
     position: player.position,
     rotation: player.rotation,
+    character: player.character || { type: 'unknown' }, // Always include character data or default
     health: player.health,
     maxHealth: player.maxHealth,
     level: player.level,
@@ -310,6 +321,14 @@ async function handleAutoConnect(clientId: string, token: string): Promise<void>
 
     // Set player online
     await playerService.setPlayerOnlineStatus(userId, true);
+    
+    // Check if this player is already connected and clean up old connection
+    const existingClientId = findClientByPlayerId(player.id);
+    if (existingClientId) {
+      console.log(`Player ${player.username} already connected, cleaning up old connection: ${existingClientId}`);
+      handleDisconnect(existingClientId);
+    }
+    
     client.playerId = player.id;
     gameState.players.set(player.id, player);
 
@@ -358,16 +377,19 @@ async function handleAutoConnect(clientId: string, token: string): Promise<void>
 }
 
 interface MoveData {
+  playerId?: string; // Firebase userId sent by client (validated against authenticated user)
   position: Position;
   rotation?: Position;
+  character?: Record<string, unknown>;
   isMoving?: boolean;
   movementDirection?: 'forward' | 'backward' | 'none';
 }
 
 interface MoveBroadcastData extends Record<string, unknown> {
-  playerId: string;
+  playerId: string; // MongoDB player.id (safe to expose to other players)
   position: Position;
   rotation?: Position;
+  character: Record<string, unknown>; // Always included (required for consistent client state)
   isMoving?: boolean;
   movementDirection?: 'forward' | 'backward' | 'none';
   timestamp: Date;
@@ -380,6 +402,8 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
     return;
   }
 
+  console.log(`[MOVE DEBUG] ClientId: ${clientId}, UserId: ${client.userId}, PlayerId: ${client.playerId}`);
+
   // Check rate limit
   if (!canSendMovementUpdate(clientId)) {
     // Silently drop the update if rate limited - no need to send error
@@ -387,37 +411,47 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
   }
 
   try {
-    const { position, rotation, isMoving, movementDirection } = data;
+    const { playerId, position, rotation, character, isMoving, movementDirection } = data;
+    
+    // Validate that the client is only moving their own player (if playerId is provided)
+    if (playerId && playerId !== client.userId) {
+      sendErrorMessage(clientId, 'Cannot move other players');
+      return;
+    }
+    
     if (!position || typeof position.x !== 'number' || typeof position.y !== 'number' || typeof position.z !== 'number') {
       sendErrorMessage(clientId, 'Invalid position data');
       return;
     }
 
-    console.log(`Player ${client.playerId} moving to position:`, position, rotation ? `with rotation:` : '', rotation);
+    console.log(`Player ${client.playerId} (Firebase: ${client.userId}) moving to position:`, position, rotation ? `with rotation:` : '', rotation);
 
-    // Update player position and rotation in database
-    if (rotation && typeof rotation.x === 'number' && typeof rotation.y === 'number' && typeof rotation.z === 'number') {
-      await playerService.updatePlayerPositionAndRotation(client.userId, position, rotation);
-    } else {
-      await playerService.updatePlayerPosition(client.userId, position);
-    }
+    // Update player position, rotation, and character in database
+    await playerService.updatePlayerPositionRotationAndCharacter(client.userId, position, rotation, character);
 
     // Update game state
-    const player = gameState.players.get(client.playerId!);
-    if (player) {
-      player.position = position;
+    const gamePlayer = gameState.players.get(client.playerId!);
+    if (gamePlayer) {
+      gamePlayer.position = position;
       if (rotation) {
-        player.rotation = rotation;
+        gamePlayer.rotation = rotation;
       }
-      player.lastUpdate = new Date();
+      if (character) {
+        gamePlayer.character = character;
+      }
+      gamePlayer.lastUpdate = new Date();
     }
 
     // Broadcast position update to other clients
     const broadcastData: MoveBroadcastData = {
       playerId: client.playerId!,
       position,
+      character: gamePlayer?.character || { type: 'unknown' }, // Always include character data or default
       timestamp: new Date(),
     };
+    
+    console.log(`[BROADCAST DEBUG] Broadcasting MongoDB playerId: ${client.playerId} for Firebase userId: ${client.userId} from client ${clientId}`);
+    console.log(`[CHARACTER DEBUG] Broadcasting character data:`, broadcastData.character);
     
     if (rotation) {
       broadcastData.rotation = rotation;
@@ -562,6 +596,9 @@ function broadcastGameState(): void {
   floorClients.forEach((clientIds, dungeonDagNodeName) => {
     if (clientIds.size > 0) {
       const playersOnFloor = getPlayersOnFloor(dungeonDagNodeName);
+      
+      console.log(`[GAME_STATE DEBUG] Broadcasting to floor ${dungeonDagNodeName}, ${playersOnFloor.length} players with character data:`, 
+        playersOnFloor.map(p => ({ id: p.id, hasCharacter: !!p.character, character: p.character })));
       
       broadcastToFloor(dungeonDagNodeName, {
         type: 'game_state',
