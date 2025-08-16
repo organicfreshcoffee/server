@@ -116,7 +116,12 @@ export class PlayerService {
   async updatePlayerPositionRotationAndCharacter(userId: string, position: Position, rotation?: Position, character?: Record<string, unknown>): Promise<void> {
     const db = getDatabase();
     
-    const updateData: any = {
+    const updateData: {
+      position: Position;
+      lastUpdate: Date;
+      rotation?: Position;
+      character?: Record<string, unknown>;
+    } = {
       position,
       lastUpdate: new Date(),
     };
