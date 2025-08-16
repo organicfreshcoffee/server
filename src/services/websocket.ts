@@ -317,6 +317,7 @@ async function handleAutoConnect(clientId: string, token: string): Promise<void>
       console.log(`Created new player: ${displayName} (${userId})`);
     } else {
       console.log(`Found existing player: ${player.username} (${userId})`);
+      console.log(`[CONNECTION DEBUG] Player character data:`, player.character);
     }
 
     // Set player online
@@ -331,6 +332,7 @@ async function handleAutoConnect(clientId: string, token: string): Promise<void>
     
     client.playerId = player.id;
     gameState.players.set(player.id, player);
+    console.log(`[CONNECTION DEBUG] Stored player in gameState with character:`, player.character);
 
     // Use player's current floor from database (defaults to 'A' if not set)
     const currentFloor = player.currentDungeonDagNodeName || 'A';
@@ -443,15 +445,20 @@ async function handlePlayerMove(clientId: string, data: MoveData): Promise<void>
     }
 
     // Broadcast position update to other clients
+    // Use the character data from the move request if provided, otherwise use stored character data
+    const characterToSend = character || gamePlayer?.character || { type: 'unknown' };
+    
     const broadcastData: MoveBroadcastData = {
       playerId: client.playerId!,
       position,
-      character: gamePlayer?.character || { type: 'unknown' }, // Always include character data or default
+      character: characterToSend, // Use the most current character data
       timestamp: new Date(),
     };
     
     console.log(`[BROADCAST DEBUG] Broadcasting MongoDB playerId: ${client.playerId} for Firebase userId: ${client.userId} from client ${clientId}`);
-    console.log(`[CHARACTER DEBUG] Broadcasting character data:`, broadcastData.character);
+    console.log(`[CHARACTER DEBUG] Character from move:`, character);
+    console.log(`[CHARACTER DEBUG] Character in gamePlayer:`, gamePlayer?.character);
+    console.log(`[CHARACTER DEBUG] Broadcasting character data:`, characterToSend);
     
     if (rotation) {
       broadcastData.rotation = rotation;
