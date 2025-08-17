@@ -495,6 +495,77 @@ interface ActionData {
   playerId?: string; // Firebase user ID that may be included by client
 }
 
+// Helper function to calculate distance between two 3D points
+function calculateDistance(pos1: Position, pos2: Position): number {
+  const dx = pos1.x - pos2.x;
+  const dy = pos1.y - pos2.y;
+  const dz = pos1.z - pos2.z;
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+// Helper function to check if a point is within a spell's area of effect
+function isPlayerHitBySpell(playerPosition: Position, spellData: any): boolean {
+  const { fromPosition, toPosition, spellRadius } = spellData;
+  
+  if (!fromPosition || !toPosition || !spellRadius) {
+    return false;
+  }
+  
+  // Calculate the closest point on the spell's line to the player
+  const lineStart = fromPosition;
+  const lineEnd = toPosition;
+  const lineVector = {
+    x: lineEnd.x - lineStart.x,
+    y: lineEnd.y - lineStart.y,
+    z: lineEnd.z - lineStart.z
+  };
+  
+  const lineLength = Math.sqrt(
+    lineVector.x * lineVector.x + 
+    lineVector.y * lineVector.y + 
+    lineVector.z * lineVector.z
+  );
+  
+  if (lineLength === 0) {
+    // If spell has no length, just check distance from start point
+    return calculateDistance(playerPosition, lineStart) <= spellRadius;
+  }
+  
+  // Normalize the line vector
+  const normalizedLine = {
+    x: lineVector.x / lineLength,
+    y: lineVector.y / lineLength,
+    z: lineVector.z / lineLength
+  };
+  
+  // Vector from line start to player
+  const playerVector = {
+    x: playerPosition.x - lineStart.x,
+    y: playerPosition.y - lineStart.y,
+    z: playerPosition.z - lineStart.z
+  };
+  
+  // Project player vector onto the line
+  const projection = 
+    playerVector.x * normalizedLine.x + 
+    playerVector.y * normalizedLine.y + 
+    playerVector.z * normalizedLine.z;
+  
+  // Clamp projection to the line segment
+  const clampedProjection = Math.max(0, Math.min(lineLength, projection));
+  
+  // Find the closest point on the line
+  const closestPoint = {
+    x: lineStart.x + normalizedLine.x * clampedProjection,
+    y: lineStart.y + normalizedLine.y * clampedProjection,
+    z: lineStart.z + normalizedLine.z * clampedProjection
+  };
+  
+  // Check if player is within the spell radius of the closest point
+  const distanceToLine = calculateDistance(playerPosition, closestPoint);
+  return distanceToLine <= spellRadius;
+}
+
 async function handlePlayerAction(clientId: string, data: ActionData): Promise<void> {
   const client = clients.get(clientId);
   if (!client || !client.isAuthenticated) {
@@ -504,6 +575,11 @@ async function handlePlayerAction(clientId: string, data: ActionData): Promise<v
 
   // Handle different player actions (attack, interact, etc.)
   console.log(`Player action from ${clientId}:`, data);
+  
+  // Special handling for spell_cast actions
+  if (data.action === 'spell_cast' && data.data) {
+    await handleSpellCast(clientId, data.data);
+  }
   
   // Sanitize action data to remove Firebase user IDs before broadcasting
   const sanitizedAction: Partial<ActionData> = { ...data };
@@ -539,6 +615,95 @@ async function handlePlayerAction(clientId: string, data: ActionData): Promise<v
     });
   } else {
     console.warn(`Player ${client.playerId} performing action but not assigned to any floor`);
+  }
+}
+
+async function handleSpellCast(casterClientId: string, spellData: any): Promise<void> {
+  const casterClient = clients.get(casterClientId);
+  if (!casterClient || !casterClient.currentDungeonDagNodeName) {
+    return;
+  }
+  
+  const currentFloor = casterClient.currentDungeonDagNodeName;
+  const floorClientIds = floorClients.get(currentFloor);
+  
+  if (!floorClientIds) {
+    return;
+  }
+  
+  console.log(`Processing spell cast from player ${casterClient.playerId} on floor ${currentFloor}`);
+  console.log(`Spell data:`, spellData);
+  
+  // Check each player on the same floor for spell hits
+  for (const targetClientId of floorClientIds) {
+    // Skip the caster
+    if (targetClientId === casterClientId) {
+      continue;
+    }
+    
+    const targetClient = clients.get(targetClientId);
+    if (!targetClient || !targetClient.playerId) {
+      continue;
+    }
+    
+    const targetPlayer = gameState.players.get(targetClient.playerId);
+    if (!targetPlayer || !targetPlayer.isAlive) {
+      continue;
+    }
+    
+    // Check if this player is hit by the spell
+    if (isPlayerHitBySpell(targetPlayer.position, spellData)) {
+      console.log(`Player ${targetPlayer.username} (${targetPlayer.id}) hit by spell!`);
+      
+      // Calculate damage (for now, fixed damage of 20, but this could be made configurable)
+      const damage = 20;
+      const newHealth = Math.max(0, targetPlayer.health - damage);
+      
+      try {
+        // Update health in database
+        await playerService.updatePlayerHealth(targetClient.userId!, newHealth);
+        
+        // Update game state
+        targetPlayer.health = newHealth;
+        targetPlayer.lastUpdate = new Date();
+        
+        // Check if player died
+        if (newHealth <= 0) {
+          targetPlayer.isAlive = false;
+          console.log(`Player ${targetPlayer.username} died from spell damage!`);
+        }
+        
+        // Send health update to the hit player
+        sendMessage(targetClientId, {
+          type: 'health_update',
+          data: {
+            health: newHealth,
+            maxHealth: targetPlayer.maxHealth,
+            damage: damage,
+            damageCause: 'spell',
+            casterPlayerId: casterClient.playerId,
+            isAlive: targetPlayer.isAlive,
+          },
+        });
+        
+        // Broadcast the hit to all players on the floor
+        broadcastToFloor(currentFloor, {
+          type: 'player_hit',
+          data: {
+            targetPlayerId: targetPlayer.id,
+            casterPlayerId: casterClient.playerId,
+            damage: damage,
+            newHealth: newHealth,
+            isAlive: targetPlayer.isAlive,
+            hitType: 'spell',
+          },
+        });
+        
+        console.log(`Player ${targetPlayer.username} health: ${newHealth}/${targetPlayer.maxHealth}`);
+      } catch (error) {
+        console.error(`Error updating health for player ${targetPlayer.id}:`, error);
+      }
+    }
   }
 }
 

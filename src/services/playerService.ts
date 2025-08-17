@@ -148,11 +148,21 @@ export class PlayerService {
   async updatePlayerHealth(userId: string, health: number): Promise<void> {
     const db = getDatabase();
     
+    // Get current player to check max health
+    const player = await this.getPlayer(userId);
+    if (!player) {
+      throw new Error('Player not found');
+    }
+    
+    const clampedHealth = Math.max(0, Math.min(health, player.maxHealth));
+    const isAlive = clampedHealth > 0;
+    
     await db.collection(this.collection).updateOne(
       { userId },
       {
         $set: {
-          health: Math.max(0, Math.min(health, 100)), // Clamp between 0 and max health
+          health: clampedHealth,
+          isAlive: isAlive,
           lastUpdate: new Date(),
         },
       }
