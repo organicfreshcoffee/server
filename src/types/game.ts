@@ -42,6 +42,8 @@ export interface WebSocketClient {
   ws: WebSocket; // WebSocket type
   userId?: string;
   playerId?: string;
+  userEmail?: string;
+  userName?: string;
   isAuthenticated: boolean;
   lastPing: Date;
   currentDungeonDagNodeName?: string; // Current floor/level in dungeon

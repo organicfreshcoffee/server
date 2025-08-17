@@ -148,11 +148,21 @@ export class PlayerService {
   async updatePlayerHealth(userId: string, health: number): Promise<void> {
     const db = getDatabase();
     
+    // Get current player to check max health
+    const player = await this.getPlayer(userId);
+    if (!player) {
+      throw new Error('Player not found');
+    }
+    
+    const clampedHealth = Math.max(0, Math.min(health, player.maxHealth));
+    const isAlive = clampedHealth > 0;
+    
     await db.collection(this.collection).updateOne(
       { userId },
       {
         $set: {
-          health: Math.max(0, Math.min(health, 100)), // Clamp between 0 and max health
+          health: clampedHealth,
+          isAlive: isAlive,
           lastUpdate: new Date(),
         },
       }
@@ -216,5 +226,79 @@ export class PlayerService {
   async deletePlayer(userId: string): Promise<void> {
     const db = getDatabase();
     await db.collection(this.collection).deleteOne({ userId });
+  }
+
+  async respawnPlayer(userId: string, spawnDungeonDagNodeName: string, newCharacterData?: Record<string, unknown>, username?: string, email?: string): Promise<Player> {
+    const db = getDatabase();
+    
+    // Get current player data
+    const existingPlayer = await this.getPlayer(userId);
+    
+    if (existingPlayer) {
+      // Existing player respawning
+      // eslint-disable-next-line no-console
+      console.log(`Respawning existing player: ${existingPlayer.username} (${userId})`);
+      
+      // Reset health, alive status, position, and floor location
+      const updateData: {
+        health: number;
+        isAlive: boolean;
+        position: Position;
+        currentDungeonDagNodeName: string;
+        lastUpdate: Date;
+        character?: Record<string, unknown>;
+      } = {
+        health: existingPlayer.maxHealth, // Reset to full health
+        isAlive: true,
+        position: { x: 0, y: 0, z: 0 }, // Reset to spawn position
+        currentDungeonDagNodeName: spawnDungeonDagNodeName, // Move to spawn floor
+        lastUpdate: new Date(),
+      };
+      
+      // Update character data if provided
+      if (newCharacterData) {
+        updateData.character = newCharacterData;
+      }
+      
+      await db.collection(this.collection).updateOne(
+        { userId },
+        { $set: updateData }
+      );
+      
+      // Return updated player data
+      return await this.getPlayer(userId) as Player;
+    } else {
+      // New player spawning in
+      // eslint-disable-next-line no-console
+      console.log(`Creating new player for spawn: ${username || 'Unknown'} (${userId})`);
+      
+      if (!username) {
+        throw new Error('Username is required for new player creation');
+      }
+      
+      const newPlayer: Omit<Player, 'id'> = {
+        userId,
+        username,
+        email,
+        position: { x: 0, y: 0, z: 0 }, // Spawn position
+        rotation: { x: 0, y: 0, z: 0 },
+        character: newCharacterData, // Character data if provided
+        health: 100,
+        maxHealth: 100,
+        level: 1,
+        experience: 0,
+        lastUpdate: new Date(),
+        isOnline: false,
+        isAlive: true,
+        currentDungeonDagNodeName: spawnDungeonDagNodeName, // Spawn floor
+      };
+
+      const result = await db.collection(this.collection).insertOne(newPlayer);
+      
+      return {
+        id: result.insertedId.toString(),
+        ...newPlayer,
+      };
+    }
   }
 }
