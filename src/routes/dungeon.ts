@@ -18,13 +18,13 @@ router.use((req, res, next) => {
 });
 
 /**
- * Get the player's current floor
- * GET /api/dungeon/current-floor
+ * Get the player's current status (floor, position, health, etc.)
+ * GET /api/dungeon/current-status
  */
-router.get('/current-floor', async (req: AuthenticatedRequest, res): Promise<void> => {
+router.get('/current-status', async (req: AuthenticatedRequest, res): Promise<void> => {
   try {
     const userId = req.user?.uid;
-    console.log(`Current floor request for user: ${userId}`);
+    console.log(`Current status request for user: ${userId}`);
 
     if (!userId) {
       console.log('No userId found in request');
@@ -56,12 +56,17 @@ router.get('/current-floor', async (req: AuthenticatedRequest, res): Promise<voi
       data: {
         currentFloor: currentFloor,
         playerId: player.id,
-        playerName: player.username
+        playerName: player.username,
+        position: player.position,
+        rotation: player.rotation,
+        health: player.health,
+        character: player.character,
+        isAlive: player.isAlive
       }
     });
-    console.log(`Successfully returned current floor data for ${player.username}`);
+    console.log(`Successfully returned current status data for ${player.username}`);
   } catch (error) {
-    console.error('Error in get-current-floor:', error);
+    console.error('Error in get-current-status:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'

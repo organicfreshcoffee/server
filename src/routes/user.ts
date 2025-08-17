@@ -149,6 +149,7 @@ router.get('/export-data', authenticateToken, async (req: AuthenticatedRequest, 
           experience: player.experience,
           lastUpdate: player.lastUpdate,
           isOnline: player.isOnline,
+          isAlive: player.isAlive,
           currentDungeonDagNodeName: player.currentDungeonDagNodeName
         }
       }

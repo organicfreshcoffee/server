@@ -19,6 +19,7 @@ export class PlayerService {
       experience: 0,
       lastUpdate: new Date(),
       isOnline: false,
+      isAlive: true,
       currentDungeonDagNodeName: 'A', // Default to root floor
     };
 
@@ -53,6 +54,7 @@ export class PlayerService {
       experience: player.experience,
       lastUpdate: player.lastUpdate,
       isOnline: player.isOnline,
+      isAlive: player.isAlive !== undefined ? player.isAlive : true, // Default to alive if not set
       currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
     };
   }
@@ -80,6 +82,7 @@ export class PlayerService {
       experience: player.experience,
       lastUpdate: player.lastUpdate,
       isOnline: player.isOnline,
+      isAlive: player.isAlive !== undefined ? player.isAlive : true, // Default to alive if not set
       currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
     };
   }
@@ -184,12 +187,14 @@ export class PlayerService {
       email: player.email,
       position: player.position,
       rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
+      character: player.character, // Character appearance/customization data
       health: player.health,
       maxHealth: player.maxHealth,
       level: player.level,
       experience: player.experience,
       lastUpdate: player.lastUpdate,
       isOnline: player.isOnline,
+      isAlive: player.isAlive !== undefined ? player.isAlive : true, // Default to alive if not set
       currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
     }));
   }
