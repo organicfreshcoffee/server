@@ -236,10 +236,18 @@ export class PlayerService {
     
     if (existingPlayer) {
       // Existing player respawning
+      // eslint-disable-next-line no-console
       console.log(`Respawning existing player: ${existingPlayer.username} (${userId})`);
       
       // Reset health, alive status, position, and floor location
-      const updateData: any = {
+      const updateData: {
+        health: number;
+        isAlive: boolean;
+        position: Position;
+        currentDungeonDagNodeName: string;
+        lastUpdate: Date;
+        character?: Record<string, unknown>;
+      } = {
         health: existingPlayer.maxHealth, // Reset to full health
         isAlive: true,
         position: { x: 0, y: 0, z: 0 }, // Reset to spawn position
@@ -261,6 +269,7 @@ export class PlayerService {
       return await this.getPlayer(userId) as Player;
     } else {
       // New player spawning in
+      // eslint-disable-next-line no-console
       console.log(`Creating new player for spawn: ${username || 'Unknown'} (${userId})`);
       
       if (!username) {

@@ -507,6 +507,16 @@ interface RespawnData {
   characterData?: Record<string, unknown>;
 }
 
+interface SpellData {
+  fromPosition: Position;
+  toPosition: Position;
+  spellRadius: number;
+  direction?: Position;
+  range?: number;
+  timestamp?: number;
+  casterPosition?: Position;
+}
+
 // Helper function to calculate distance between two 3D points
 function calculateDistance(pos1: Position, pos2: Position): number {
   const dx = pos1.x - pos2.x;
@@ -516,7 +526,7 @@ function calculateDistance(pos1: Position, pos2: Position): number {
 }
 
 // Helper function to check if a point is within a spell's area of effect
-function isPlayerHitBySpell(playerPosition: Position, spellData: any): boolean {
+function isPlayerHitBySpell(playerPosition: Position, spellData: SpellData): boolean {
   const { fromPosition, toPosition, spellRadius } = spellData;
   
   console.log(`[HIT DETECTION DEBUG] Checking hit for player at (${playerPosition.x}, ${playerPosition.y}, ${playerPosition.z})`);
@@ -606,7 +616,13 @@ async function handlePlayerAction(clientId: string, data: ActionData): Promise<v
   // Special handling for spell_cast actions
   if (data.action === 'spell_cast' && data.data) {
     console.log(`[PLAYER ACTION DEBUG] Detected spell_cast action, calling handleSpellCast`);
-    await handleSpellCast(clientId, data.data);
+    // Type guard for spell data
+    const spellData = data.data as unknown as SpellData;
+    if (spellData.fromPosition && spellData.toPosition && spellData.spellRadius) {
+      await handleSpellCast(clientId, spellData);
+    } else {
+      console.log(`[PLAYER ACTION DEBUG] Invalid spell data structure`);
+    }
   } else {
     console.log(`[PLAYER ACTION DEBUG] Action type: ${data.action}, has data: ${!!data.data}`);
   }
@@ -648,7 +664,7 @@ async function handlePlayerAction(clientId: string, data: ActionData): Promise<v
   }
 }
 
-async function handleSpellCast(casterClientId: string, spellData: any): Promise<void> {
+async function handleSpellCast(casterClientId: string, spellData: SpellData): Promise<void> {
   const casterClient = clients.get(casterClientId);
   if (!casterClient || !casterClient.currentDungeonDagNodeName) {
     console.log(`[SPELL HIT DEBUG] Caster client not found or not on a floor. ClientId: ${casterClientId}`);
@@ -729,7 +745,10 @@ async function handleSpellCast(casterClientId: string, spellData: any): Promise<
     console.log(`[SPELL HIT DEBUG] Checking player ${targetPlayer.username} (${targetPlayer.id}) at position (${targetPlayer.position.x}, ${targetPlayer.position.y}, ${targetPlayer.position.z})`);
     
     // Check if this player is hit by the spell
-    const adjustedSpellData = { ...spellData, spellRadius: adjustedSpellRadius };
+    const adjustedSpellData: SpellData = { 
+      ...spellData, 
+      spellRadius: adjustedSpellRadius 
+    };
     const isHit = isPlayerHitBySpell(targetPlayer.position, adjustedSpellData);
     console.log(`[SPELL HIT DEBUG] Hit detection result for ${targetPlayer.username}: ${isHit}`);
     
