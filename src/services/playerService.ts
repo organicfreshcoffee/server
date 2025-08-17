@@ -227,4 +227,36 @@ export class PlayerService {
     const db = getDatabase();
     await db.collection(this.collection).deleteOne({ userId });
   }
+
+  async respawnPlayer(userId: string, spawnDungeonDagNodeName: string, newCharacterData?: Record<string, unknown>): Promise<Player> {
+    const db = getDatabase();
+    
+    // Get current player data
+    const existingPlayer = await this.getPlayer(userId);
+    if (!existingPlayer) {
+      throw new Error('Player not found');
+    }
+    
+    // Reset health, alive status, position, and floor location
+    const updateData: any = {
+      health: existingPlayer.maxHealth, // Reset to full health
+      isAlive: true,
+      position: { x: 0, y: 0, z: 0 }, // Reset to spawn position
+      currentDungeonDagNodeName: spawnDungeonDagNodeName, // Move to spawn floor
+      lastUpdate: new Date(),
+    };
+    
+    // Update character data if provided
+    if (newCharacterData) {
+      updateData.character = newCharacterData;
+    }
+    
+    await db.collection(this.collection).updateOne(
+      { userId },
+      { $set: updateData }
+    );
+    
+    // Return updated player data
+    return await this.getPlayer(userId) as Player;
+  }
 }

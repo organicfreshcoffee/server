@@ -4,10 +4,12 @@ import { IncomingMessage } from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import { AuthService } from './authService';
 import { PlayerService } from './playerService';
+import { DungeonService } from './dungeonService';
 import { GameMessage, WebSocketClient, GameState, Player, Position } from '../types/game';
 
 const authService = new AuthService();
 const playerService = new PlayerService();
+const dungeonService = new DungeonService();
 const clients = new Map<string, WebSocketClient>();
 // Track clients by floor for efficient broadcasting
 const floorClients = new Map<string, Set<string>>(); // dungeonDagNodeName -> Set of clientIds
@@ -268,6 +270,10 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
         await handlePlayerAction(clientId, message.data as unknown as ActionData);
         break;
 
+      case 'player_respawn':
+        await handlePlayerRespawn(clientId, message.data as unknown as RespawnData);
+        break;
+
       case 'ping':
         handlePing(clientId);
         break;
@@ -495,6 +501,10 @@ interface ActionData {
   playerId?: string; // Firebase user ID that may be included by client
 }
 
+interface RespawnData {
+  characterData?: Record<string, unknown>;
+}
+
 // Helper function to calculate distance between two 3D points
 function calculateDistance(pos1: Position, pos2: Position): number {
   const dx = pos1.x - pos2.x;
@@ -704,6 +714,89 @@ async function handleSpellCast(casterClientId: string, spellData: any): Promise<
         console.error(`Error updating health for player ${targetPlayer.id}:`, error);
       }
     }
+  }
+}
+
+async function handlePlayerRespawn(clientId: string, data: RespawnData): Promise<void> {
+  const client = clients.get(clientId);
+  if (!client || !client.isAuthenticated || !client.userId) {
+    sendErrorMessage(clientId, 'Not authenticated');
+    return;
+  }
+
+  console.log(`Player respawn request from ${clientId}:`, data);
+
+  try {
+    // Get current player
+    const currentPlayer = gameState.players.get(client.playerId!);
+    if (!currentPlayer) {
+      sendErrorMessage(clientId, 'Player not found in game state');
+      return;
+    }
+
+    // Get spawn location from dungeon service
+    const spawnDungeonDagNodeName = await dungeonService.getSpawn();
+    if (!spawnDungeonDagNodeName) {
+      sendErrorMessage(clientId, 'Spawn location not found. Dungeon may not be initialized.');
+      return;
+    }
+
+    // Respawn the player with new character data if provided
+    const respawnedPlayer = await playerService.respawnPlayer(client.userId, spawnDungeonDagNodeName, data.characterData);
+
+    // Update game state
+    gameState.players.set(client.playerId!, respawnedPlayer);
+
+    // Remove client from current floor and move to spawn floor
+    const oldFloor = client.currentDungeonDagNodeName;
+    if (oldFloor) {
+      removeClientFromFloor(clientId, oldFloor);
+      
+      // Notify old floor that player left
+      broadcastToFloor(oldFloor, {
+        type: 'player_left_floor',
+        data: { 
+          playerId: client.playerId,
+          fromFloor: oldFloor,
+          toFloor: spawnDungeonDagNodeName,
+          reason: 'respawn',
+        },
+      });
+    }
+    
+    // Add client to spawn floor
+    addClientToFloor(clientId, spawnDungeonDagNodeName);
+
+    // Send success response to the respawning player
+    sendMessage(clientId, {
+      type: 'respawn_success',
+      data: {
+        player: {
+          id: respawnedPlayer.id,
+          username: respawnedPlayer.username,
+          health: respawnedPlayer.health,
+          maxHealth: respawnedPlayer.maxHealth,
+          isAlive: respawnedPlayer.isAlive,
+          character: respawnedPlayer.character,
+          level: respawnedPlayer.level,
+          experience: respawnedPlayer.experience,
+          position: respawnedPlayer.position,
+          currentDungeonDagNodeName: respawnedPlayer.currentDungeonDagNodeName,
+        },
+        spawnFloor: spawnDungeonDagNodeName,
+      },
+    });
+
+    // Broadcast respawn to other players on the spawn floor
+    broadcastToFloorExcluding(spawnDungeonDagNodeName, clientId, {
+      type: 'player_respawned',
+      data: createSafePlayerData(respawnedPlayer),
+    });
+
+    console.log(`Player ${respawnedPlayer.username} (${client.userId}) respawned successfully at spawn floor ${spawnDungeonDagNodeName}`);
+  } catch (error) {
+    console.error('Player respawn error:', error);
+    sendErrorMessage(clientId, 'Error respawning player');
   }
 }
 

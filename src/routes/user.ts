@@ -1,12 +1,14 @@
 import { Router, Request, Response } from 'express';
 import { PlayerService } from '../services/playerService';
 import { AuthService } from '../services/authService';
+import { DungeonService } from '../services/dungeonService';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { Player } from '../types/game';
 
 const router = Router();
 const playerService = new PlayerService();
 const authService = new AuthService();
+const dungeonService = new DungeonService();
 
 // Add logging for all user routes
 router.use((req, res, next) => {
@@ -162,6 +164,89 @@ router.get('/export-data', authenticateToken, async (req: AuthenticatedRequest, 
     res.status(500).json({
       success: false,
       error: 'Internal server error while exporting user data'
+    });
+  }
+});
+
+/**
+ * Respawn/Reset character after death
+ * POST /api/user/respawn
+ * 
+ * Requires authentication via bearer token
+ */
+router.post('/respawn', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    const { characterData } = req.body;
+
+    // Validate character data if provided
+    if (characterData && typeof characterData !== 'object') {
+      res.status(400).json({
+        success: false,
+        error: 'Character data must be an object'
+      });
+      return;
+    }
+
+    const player = await playerService.getPlayer(userId);
+
+    if (!player) {
+      res.status(404).json({
+        success: false,
+        error: 'Player not found'
+      });
+      return;
+    }
+
+    // Get spawn location from dungeon service
+    const spawnDungeonDagNodeName = await dungeonService.getSpawn();
+    if (!spawnDungeonDagNodeName) {
+      res.status(500).json({
+        success: false,
+        error: 'Spawn location not found. Dungeon may not be initialized.'
+      });
+      return;
+    }
+
+    // Respawn the player
+    const respawnedPlayer = await playerService.respawnPlayer(userId, spawnDungeonDagNodeName, characterData);
+
+    res.json({
+      success: true,
+      message: 'Player respawned successfully',
+      data: {
+        player: {
+          id: respawnedPlayer.id,
+          username: respawnedPlayer.username,
+          health: respawnedPlayer.health,
+          maxHealth: respawnedPlayer.maxHealth,
+          isAlive: respawnedPlayer.isAlive,
+          character: respawnedPlayer.character,
+          level: respawnedPlayer.level,
+          experience: respawnedPlayer.experience,
+          position: respawnedPlayer.position,
+          currentDungeonDagNodeName: respawnedPlayer.currentDungeonDagNodeName
+        },
+        spawnFloor: spawnDungeonDagNodeName
+      }
+    });
+
+    console.log(`Player respawned via HTTP: ${respawnedPlayer.username} (${userId}) at spawn floor ${spawnDungeonDagNodeName}`);
+
+  } catch (error) {
+    console.error('Error in respawn:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error while respawning player'
     });
   }
 });
