@@ -14,6 +14,7 @@ export interface Player {
   experience: number;
   lastUpdate: Date;
   isOnline: boolean;
+  isAlive: boolean;
   currentDungeonDagNodeName?: string; // Current floor/level in dungeon
 }
 
