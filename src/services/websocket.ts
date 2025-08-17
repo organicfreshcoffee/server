@@ -519,7 +519,11 @@ function calculateDistance(pos1: Position, pos2: Position): number {
 function isPlayerHitBySpell(playerPosition: Position, spellData: any): boolean {
   const { fromPosition, toPosition, spellRadius } = spellData;
   
+  console.log(`[HIT DETECTION DEBUG] Checking hit for player at (${playerPosition.x}, ${playerPosition.y}, ${playerPosition.z})`);
+  console.log(`[HIT DETECTION DEBUG] Spell from (${fromPosition.x}, ${fromPosition.y}, ${fromPosition.z}) to (${toPosition.x}, ${toPosition.y}, ${toPosition.z}), radius: ${spellRadius}`);
+  
   if (!fromPosition || !toPosition || !spellRadius) {
+    console.log(`[HIT DETECTION DEBUG] Missing spell data, returning false`);
     return false;
   }
   
@@ -538,9 +542,13 @@ function isPlayerHitBySpell(playerPosition: Position, spellData: any): boolean {
     lineVector.z * lineVector.z
   );
   
+  console.log(`[HIT DETECTION DEBUG] Line length: ${lineLength}`);
+  
   if (lineLength === 0) {
     // If spell has no length, just check distance from start point
-    return calculateDistance(playerPosition, lineStart) <= spellRadius;
+    const distance = calculateDistance(playerPosition, lineStart);
+    console.log(`[HIT DETECTION DEBUG] Zero-length spell, distance from start: ${distance}, hit: ${distance <= spellRadius}`);
+    return distance <= spellRadius;
   }
   
   // Normalize the line vector
@@ -566,6 +574,8 @@ function isPlayerHitBySpell(playerPosition: Position, spellData: any): boolean {
   // Clamp projection to the line segment
   const clampedProjection = Math.max(0, Math.min(lineLength, projection));
   
+  console.log(`[HIT DETECTION DEBUG] Projection: ${projection}, clamped: ${clampedProjection}`);
+  
   // Find the closest point on the line
   const closestPoint = {
     x: lineStart.x + normalizedLine.x * clampedProjection,
@@ -575,7 +585,12 @@ function isPlayerHitBySpell(playerPosition: Position, spellData: any): boolean {
   
   // Check if player is within the spell radius of the closest point
   const distanceToLine = calculateDistance(playerPosition, closestPoint);
-  return distanceToLine <= spellRadius;
+  const isHit = distanceToLine <= spellRadius;
+  
+  console.log(`[HIT DETECTION DEBUG] Closest point on line: (${closestPoint.x}, ${closestPoint.y}, ${closestPoint.z})`);
+  console.log(`[HIT DETECTION DEBUG] Distance to line: ${distanceToLine}, spell radius: ${spellRadius}, hit: ${isHit}`);
+  
+  return isHit;
 }
 
 async function handlePlayerAction(clientId: string, data: ActionData): Promise<void> {
@@ -586,11 +601,14 @@ async function handlePlayerAction(clientId: string, data: ActionData): Promise<v
   }
 
   // Handle different player actions (attack, interact, etc.)
-  console.log(`Player action from ${clientId}:`, data);
+  console.log(`[PLAYER ACTION DEBUG] Player action from ${clientId}:`, JSON.stringify(data, null, 2));
   
   // Special handling for spell_cast actions
   if (data.action === 'spell_cast' && data.data) {
+    console.log(`[PLAYER ACTION DEBUG] Detected spell_cast action, calling handleSpellCast`);
     await handleSpellCast(clientId, data.data);
+  } else {
+    console.log(`[PLAYER ACTION DEBUG] Action type: ${data.action}, has data: ${!!data.data}`);
   }
   
   // Sanitize action data to remove Firebase user IDs before broadcasting
@@ -633,6 +651,7 @@ async function handlePlayerAction(clientId: string, data: ActionData): Promise<v
 async function handleSpellCast(casterClientId: string, spellData: any): Promise<void> {
   const casterClient = clients.get(casterClientId);
   if (!casterClient || !casterClient.currentDungeonDagNodeName) {
+    console.log(`[SPELL HIT DEBUG] Caster client not found or not on a floor. ClientId: ${casterClientId}`);
     return;
   }
   
@@ -640,32 +659,83 @@ async function handleSpellCast(casterClientId: string, spellData: any): Promise<
   const floorClientIds = floorClients.get(currentFloor);
   
   if (!floorClientIds) {
+    console.log(`[SPELL HIT DEBUG] No clients found on floor ${currentFloor}`);
     return;
   }
   
-  console.log(`Processing spell cast from player ${casterClient.playerId} on floor ${currentFloor}`);
-  console.log(`Spell data:`, spellData);
+  console.log(`[SPELL HIT DEBUG] Processing spell cast from player ${casterClient.playerId} on floor ${currentFloor}`);
+  console.log(`[SPELL HIT DEBUG] Spell data:`, JSON.stringify(spellData, null, 2));
+  console.log(`[SPELL HIT DEBUG] Players on floor: ${Array.from(floorClientIds).length}`);
+  
+  // Validate spell data
+  const { fromPosition, toPosition, spellRadius } = spellData;
+  if (!fromPosition || !toPosition || !spellRadius) {
+    console.log(`[SPELL HIT DEBUG] Invalid spell data - missing required fields:`, {
+      hasFromPosition: !!fromPosition,
+      hasToPosition: !!toPosition,
+      hasSpellRadius: !!spellRadius
+    });
+    return;
+  }
+  
+  // Increase spell radius to account for height differences between spell trajectory and player positions
+  // TODO: Fix the root cause of Y-coordinate mismatch between spells (Y=7.2) and players (Y=6)
+  const adjustedSpellRadius = Math.max(spellRadius, 2); // Minimum radius of 2 to account for height difference
+  console.log(`[SPELL HIT DEBUG] Original spell radius: ${spellRadius}, adjusted radius: ${adjustedSpellRadius}`);
+  
+  console.log(`[SPELL HIT DEBUG] Spell trajectory: from (${fromPosition.x}, ${fromPosition.y}, ${fromPosition.z}) to (${toPosition.x}, ${toPosition.y}, ${toPosition.z}) with radius ${adjustedSpellRadius}`);
+  
+  // Get fresh player positions from the database for all players on this floor
+  const playersHitDetected: string[] = [];
+  let playersChecked = 0;
   
   // Check each player on the same floor for spell hits
   for (const targetClientId of floorClientIds) {
     // Skip the caster
     if (targetClientId === casterClientId) {
+      console.log(`[SPELL HIT DEBUG] Skipping caster client ${targetClientId}`);
       continue;
     }
     
     const targetClient = clients.get(targetClientId);
-    if (!targetClient || !targetClient.playerId) {
+    if (!targetClient || !targetClient.playerId || !targetClient.userId) {
+      console.log(`[SPELL HIT DEBUG] Target client ${targetClientId} missing required data:`, {
+        hasClient: !!targetClient,
+        playerId: targetClient?.playerId,
+        userId: targetClient?.userId
+      });
       continue;
     }
     
-    const targetPlayer = gameState.players.get(targetClient.playerId);
-    if (!targetPlayer || !targetPlayer.isAlive) {
+    // Get fresh player data from database to ensure we have the latest position
+    let targetPlayer;
+    try {
+      targetPlayer = await playerService.getPlayer(targetClient.userId);
+      if (!targetPlayer) {
+        console.log(`[SPELL HIT DEBUG] Could not find player in database for userId: ${targetClient.userId}`);
+        continue;
+      }
+    } catch (error) {
+      console.error(`[SPELL HIT DEBUG] Error fetching player from database:`, error);
       continue;
     }
+    
+    if (!targetPlayer.isAlive) {
+      console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} is already dead, skipping`);
+      continue;
+    }
+    
+    playersChecked++;
+    console.log(`[SPELL HIT DEBUG] Checking player ${targetPlayer.username} (${targetPlayer.id}) at position (${targetPlayer.position.x}, ${targetPlayer.position.y}, ${targetPlayer.position.z})`);
     
     // Check if this player is hit by the spell
-    if (isPlayerHitBySpell(targetPlayer.position, spellData)) {
-      console.log(`Player ${targetPlayer.username} (${targetPlayer.id}) hit by spell!`);
+    const adjustedSpellData = { ...spellData, spellRadius: adjustedSpellRadius };
+    const isHit = isPlayerHitBySpell(targetPlayer.position, adjustedSpellData);
+    console.log(`[SPELL HIT DEBUG] Hit detection result for ${targetPlayer.username}: ${isHit}`);
+    
+    if (isHit) {
+      console.log(`[SPELL HIT DEBUG] *** PLAYER HIT DETECTED *** ${targetPlayer.username} (${targetPlayer.id}) hit by spell!`);
+      playersHitDetected.push(targetPlayer.username);
       
       // Calculate damage (for now, fixed damage of 20, but this could be made configurable)
       const damage = 20;
@@ -673,19 +743,31 @@ async function handleSpellCast(casterClientId: string, spellData: any): Promise<
       
       try {
         // Update health in database
-        await playerService.updatePlayerHealth(targetClient.userId!, newHealth);
+        await playerService.updatePlayerHealth(targetClient.userId, newHealth);
+        console.log(`[SPELL HIT DEBUG] Updated ${targetPlayer.username} health in database: ${targetPlayer.health} -> ${newHealth}`);
         
         // Update game state
-        targetPlayer.health = newHealth;
-        targetPlayer.lastUpdate = new Date();
-        
-        // Check if player died
-        if (newHealth <= 0) {
-          targetPlayer.isAlive = false;
-          console.log(`Player ${targetPlayer.username} died from spell damage!`);
+        const gameStatePlayer = gameState.players.get(targetClient.playerId);
+        if (gameStatePlayer) {
+          gameStatePlayer.health = newHealth;
+          gameStatePlayer.lastUpdate = new Date();
+          
+          // Check if player died
+          if (newHealth <= 0) {
+            gameStatePlayer.isAlive = false;
+            console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} died from spell damage!`);
+          }
+        } else {
+          console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} not found in gameState, updating from fresh data`);
+          targetPlayer.health = newHealth;
+          if (newHealth <= 0) {
+            targetPlayer.isAlive = false;
+          }
+          gameState.players.set(targetClient.playerId, targetPlayer);
         }
         
         // Send health update to the hit player
+        console.log(`[SPELL HIT DEBUG] Sending health_update to ${targetPlayer.username}`);
         sendMessage(targetClientId, {
           type: 'health_update',
           data: {
@@ -694,11 +776,12 @@ async function handleSpellCast(casterClientId: string, spellData: any): Promise<
             damage: damage,
             damageCause: 'spell',
             casterPlayerId: casterClient.playerId,
-            isAlive: targetPlayer.isAlive,
+            isAlive: newHealth > 0,
           },
         });
         
         // Broadcast the hit to all players on the floor
+        console.log(`[SPELL HIT DEBUG] Broadcasting player_hit to all players on floor ${currentFloor}`);
         broadcastToFloor(currentFloor, {
           type: 'player_hit',
           data: {
@@ -706,16 +789,25 @@ async function handleSpellCast(casterClientId: string, spellData: any): Promise<
             casterPlayerId: casterClient.playerId,
             damage: damage,
             newHealth: newHealth,
-            isAlive: targetPlayer.isAlive,
+            isAlive: newHealth > 0,
             hitType: 'spell',
           },
         });
         
-        console.log(`Player ${targetPlayer.username} health: ${newHealth}/${targetPlayer.maxHealth}`);
+        console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} health updated: ${newHealth}/${targetPlayer.maxHealth}`);
       } catch (error) {
-        console.error(`Error updating health for player ${targetPlayer.id}:`, error);
+        console.error(`[SPELL HIT DEBUG] Error updating health for player ${targetPlayer.id}:`, error);
       }
+    } else {
+      // Log why the player wasn't hit for debugging
+      const distance = calculateDistance(targetPlayer.position, spellData.fromPosition);
+      console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} NOT hit. Distance from spell origin: ${distance.toFixed(2)}, adjusted spell radius: ${adjustedSpellRadius}`);
     }
+  }
+  
+  console.log(`[SPELL HIT DEBUG] Spell hit detection complete. Players checked: ${playersChecked}, Players hit: ${playersHitDetected.length}`);
+  if (playersHitDetected.length > 0) {
+    console.log(`[SPELL HIT DEBUG] Players hit: ${playersHitDetected.join(', ')}`);
   }
 }
 
