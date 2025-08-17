@@ -136,11 +136,13 @@ router.get('/export-data', authenticateToken, async (req: AuthenticatedRequest, 
       data: {
         exportedAt: new Date().toISOString(),
         userData: {
+          id: player.id,
           userId: player.userId,
           username: player.username,
           email: player.email,
           position: player.position,
           rotation: player.rotation,
+          character: player.character,
           health: player.health,
           maxHealth: player.maxHealth,
           level: player.level,
