@@ -313,6 +313,8 @@ async function handleAutoConnect(clientId: string, token: string): Promise<void>
 
     // Set client as authenticated
     client.userId = userId;
+    client.userEmail = userEmail || undefined;
+    client.userName = userName || undefined;
     client.isAuthenticated = true;
 
     // Get or create player
@@ -727,13 +729,6 @@ async function handlePlayerRespawn(clientId: string, data: RespawnData): Promise
   console.log(`Player respawn request from ${clientId}:`, data);
 
   try {
-    // Get current player
-    const currentPlayer = gameState.players.get(client.playerId!);
-    if (!currentPlayer) {
-      sendErrorMessage(clientId, 'Player not found in game state');
-      return;
-    }
-
     // Get spawn location from dungeon service
     const spawnDungeonDagNodeName = await dungeonService.getSpawn();
     if (!spawnDungeonDagNodeName) {
@@ -741,11 +736,25 @@ async function handlePlayerRespawn(clientId: string, data: RespawnData): Promise
       return;
     }
 
-    // Respawn the player with new character data if provided
-    const respawnedPlayer = await playerService.respawnPlayer(client.userId, spawnDungeonDagNodeName, data.characterData);
+    // Generate username if needed for new players
+    const username = client.userName || (client.userEmail ? client.userEmail.split('@')[0] : 'Player');
+
+    // Respawn the player (works for both existing and new players)
+    const respawnedPlayer = await playerService.respawnPlayer(
+      client.userId, 
+      spawnDungeonDagNodeName, 
+      data.characterData,
+      username,
+      client.userEmail
+    );
 
     // Update game state
-    gameState.players.set(client.playerId!, respawnedPlayer);
+    gameState.players.set(respawnedPlayer.id, respawnedPlayer);
+    
+    // Update client's playerId if it's a new player
+    if (!client.playerId) {
+      client.playerId = respawnedPlayer.id;
+    }
 
     // Remove client from current floor and move to spawn floor
     const oldFloor = client.currentDungeonDagNodeName;
@@ -784,6 +793,7 @@ async function handlePlayerRespawn(clientId: string, data: RespawnData): Promise
           currentDungeonDagNodeName: respawnedPlayer.currentDungeonDagNodeName,
         },
         spawnFloor: spawnDungeonDagNodeName,
+        isNewPlayer: !gameState.players.has(respawnedPlayer.id),
       },
     });
 

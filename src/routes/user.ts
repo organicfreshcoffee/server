@@ -197,16 +197,6 @@ router.post('/respawn', authenticateToken, async (req: AuthenticatedRequest, res
       return;
     }
 
-    const player = await playerService.getPlayer(userId);
-
-    if (!player) {
-      res.status(404).json({
-        success: false,
-        error: 'Player not found'
-      });
-      return;
-    }
-
     // Get spawn location from dungeon service
     const spawnDungeonDagNodeName = await dungeonService.getSpawn();
     if (!spawnDungeonDagNodeName) {
@@ -217,8 +207,19 @@ router.post('/respawn', authenticateToken, async (req: AuthenticatedRequest, res
       return;
     }
 
-    // Respawn the player
-    const respawnedPlayer = await playerService.respawnPlayer(userId, spawnDungeonDagNodeName, characterData);
+    // Get user information from the token for potential new player creation
+    const userEmail = req.user?.email || undefined;
+    const userName = req.user?.name || undefined;
+    const username = userName || (userEmail ? userEmail.split('@')[0] : 'Player');
+
+    // Respawn the player (works for both existing and new players)
+    const respawnedPlayer = await playerService.respawnPlayer(
+      userId, 
+      spawnDungeonDagNodeName, 
+      characterData,
+      username,
+      userEmail
+    );
 
     res.json({
       success: true,
