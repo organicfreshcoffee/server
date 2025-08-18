@@ -2,6 +2,7 @@
 
 # GCP Deployment Setup Script
 # This script helps set up the necessary GCP resources for deploying the game server
+# Usage: ./setup-gcp.sh [staging|production]
 
 set -e
 
@@ -12,16 +13,35 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Get environment argument
+ENVIRONMENT=${1:-production}
+
+# Validate environment
+if [[ "$ENVIRONMENT" != "staging" && "$ENVIRONMENT" != "production" ]]; then
+    echo -e "${RED}Error: Environment must be 'staging' or 'production'${NC}"
+    echo "Usage: $0 [staging|production]"
+    exit 1
+fi
+
 # Configuration
 PROJECT_ID=""
 REGION="us-central1"
-SERVICE_NAME="organicfreshcoffee-game-server"
-SERVICE_ACCOUNT_NAME="github-actions-sa"
-REPOSITORY_NAME="game-server"
+
+# Environment-specific configuration
+if [ "$ENVIRONMENT" = "staging" ]; then
+    SERVICE_NAME="organicfreshcoffee-game-server-staging"
+    SERVICE_ACCOUNT_NAME="github-actions-staging-sa"
+    REPOSITORY_NAME="game-server-staging"
+else
+    SERVICE_NAME="organicfreshcoffee-game-server"
+    SERVICE_ACCOUNT_NAME="github-actions-sa"
+    REPOSITORY_NAME="game-server"
+fi
 
 print_header() {
     echo -e "${BLUE}======================================${NC}"
     echo -e "${BLUE}  GCP Deployment Setup for Game Server${NC}"
+    echo -e "${BLUE}  Environment: ${ENVIRONMENT}${NC}"
     echo -e "${BLUE}======================================${NC}"
     echo ""
 }
@@ -104,7 +124,7 @@ create_artifact_registry() {
         gcloud artifacts repositories create $REPOSITORY_NAME \
             --repository-format=docker \
             --location=$REGION \
-            --description="Game server container images"
+            --description="Game server container images for $ENVIRONMENT"
         print_info "Artifact Registry repository created!"
     fi
 }
@@ -117,7 +137,7 @@ create_service_account() {
         print_warning "Service account $SERVICE_ACCOUNT_NAME already exists"
     else
         gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME \
-            --display-name="GitHub Actions Service Account"
+            --display-name="GitHub SA $ENVIRONMENT"
         print_info "Service account created!"
     fi
     
@@ -140,26 +160,30 @@ create_service_account() {
 setup_workload_identity() {
     print_step "Setting up Workload Identity Federation..."
     
+    # Environment-specific pool and provider names
+    POOL_NAME="github-actions-pool-${ENVIRONMENT}"
+    PROVIDER_NAME="github-actions-provider-${ENVIRONMENT}"
+    
     # Create workload identity pool
-    if gcloud iam workload-identity-pools describe "github-actions-pool" --location="global" &>/dev/null; then
+    if gcloud iam workload-identity-pools describe "$POOL_NAME" --location="global" &>/dev/null; then
         print_warning "Workload identity pool already exists"
     else
-        gcloud iam workload-identity-pools create "github-actions-pool" \
+        gcloud iam workload-identity-pools create "$POOL_NAME" \
             --location="global" \
-            --display-name="GitHub Actions Pool"
+            --display-name="GitHub Pool $ENVIRONMENT"
         print_info "Workload identity pool created!"
     fi
     
     # Create workload identity provider
-    if gcloud iam workload-identity-pools providers describe "github-actions-provider" \
+    if gcloud iam workload-identity-pools providers describe "$PROVIDER_NAME" \
         --location="global" \
-        --workload-identity-pool="github-actions-pool" &>/dev/null; then
+        --workload-identity-pool="$POOL_NAME" &>/dev/null; then
         print_warning "Workload identity provider already exists"
     else
-        gcloud iam workload-identity-pools providers create-oidc "github-actions-provider" \
+        gcloud iam workload-identity-pools providers create-oidc "$PROVIDER_NAME" \
             --location="global" \
-            --workload-identity-pool="github-actions-pool" \
-            --display-name="GitHub Actions Provider" \
+            --workload-identity-pool="$POOL_NAME" \
+            --display-name="GitHub Provider $ENVIRONMENT" \
             --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner" \
             --attribute-condition="assertion.repository_owner == 'organicfreshcoffee'" \
             --issuer-uri="https://token.actions.githubusercontent.com"
@@ -173,7 +197,7 @@ setup_workload_identity() {
     gcloud iam service-accounts add-iam-policy-binding \
         "${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" \
         --role="roles/iam.workloadIdentityUser" \
-        --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions-pool/attribute.repository/organicfreshcoffee/server"
+        --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_NAME}/attribute.repository/organicfreshcoffee/server"
     
     print_info "Workload Identity Federation configured!"
 }
@@ -181,21 +205,40 @@ setup_workload_identity() {
 print_summary() {
     print_step "Setup completed! Here's what you need to configure in GitHub:"
     echo ""
-    echo -e "${YELLOW}GitHub Secrets to add:${NC}"
+    echo -e "${YELLOW}GitHub Secrets to add for ${ENVIRONMENT}:${NC}"
     echo "=============================="
-    echo "GCP_PROJECT_ID: $PROJECT_ID"
-    echo "SERVICE_ACCOUNT_EMAIL: ${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
     
-    # Get the full workload identity provider name
-    PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
-    WORKLOAD_IDENTITY_PROVIDER="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider"
-    echo "WORKLOAD_IDENTITY_PROVIDER: $WORKLOAD_IDENTITY_PROVIDER"
-    echo ""
-    echo -e "${YELLOW}Additional secrets you need to add:${NC}"
-    echo "=================================="
-    echo "MONGODB_URI: (your MongoDB connection string)"
-    echo "AUTH_SERVER_URL: (your auth server URL)"
-    echo "CLIENT_URL: (your client app URL)"
+    # Environment-specific secret naming
+    if [ "$ENVIRONMENT" = "staging" ]; then
+        echo "GCP_PROJECT_ID_STAGING: $PROJECT_ID"
+        echo "SERVICE_ACCOUNT_EMAIL_STAGING: ${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+        
+        # Get the full workload identity provider name
+        PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
+        WORKLOAD_IDENTITY_PROVIDER="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions-pool-${ENVIRONMENT}/providers/github-actions-provider-${ENVIRONMENT}"
+        echo "WORKLOAD_IDENTITY_PROVIDER_STAGING: $WORKLOAD_IDENTITY_PROVIDER"
+        echo ""
+        echo -e "${YELLOW}Additional secrets you need to add for staging:${NC}"
+        echo "=============================================="
+        echo "MONGODB_URI_STAGING: (your MongoDB connection string for staging)"
+        echo "AUTH_SERVER_URL_STAGING: (your auth server URL for staging)"
+        echo "CLIENT_URL_STAGING: (your client app URL for staging)"
+    else
+        echo "GCP_PROJECT_ID: $PROJECT_ID"
+        echo "SERVICE_ACCOUNT_EMAIL: ${SERVICE_ACCOUNT_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+        
+        # Get the full workload identity provider name
+        PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
+        WORKLOAD_IDENTITY_PROVIDER="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-actions-pool-${ENVIRONMENT}/providers/github-actions-provider-${ENVIRONMENT}"
+        echo "WORKLOAD_IDENTITY_PROVIDER: $WORKLOAD_IDENTITY_PROVIDER"
+        echo ""
+        echo -e "${YELLOW}Additional secrets you need to add for production:${NC}"
+        echo "==============================================="
+        echo "MONGODB_URI: (your MongoDB connection string)"
+        echo "AUTH_SERVER_URL: (your auth server URL)"
+        echo "CLIENT_URL: (your client app URL)"
+    fi
+    
     echo ""
     echo -e "${GREEN}Your Cloud Run service will be available at:${NC}"
     echo "https://${SERVICE_NAME}-${PROJECT_NUMBER}.${REGION}.run.app"

@@ -1,0 +1,110 @@
+name: Deploy PR to Staging
+
+on:
+  pull_request:
+    types: [labeled]
+
+env:
+  REGION: us-central1
+  REGISTRY: us-central1-docker.pkg.dev
+
+jobs:
+  deploy-pr-staging:
+    name: Deploy PR to Staging
+    runs-on: ubuntu-latest
+    if: contains(github.event.label.name, 'deploy')
+    
+    environment: staging
+    
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    
+    env:
+      PROJECT_ID: ${{ secrets.GCP_PROJECT_ID_STAGING }}
+      SERVICE_NAME: organicfreshcoffee-game-server-staging
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run linter
+      run: npm run lint
+      
+    - name: Build TypeScript
+      run: npm run build
+      
+    - name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_STAGING }}
+        service_account: ${{ secrets.SERVICE_ACCOUNT_EMAIL_STAGING }}
+        
+    - name: Configure Docker for Artifact Registry
+      run: gcloud auth configure-docker ${{ env.REGISTRY }}
+      
+    - name: Build Docker image
+      run: |
+        docker build -f Dockerfile.prod \
+          -t ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/game-server-staging/${{ env.SERVICE_NAME }}:pr-${{ github.event.pull_request.number }} \
+          -t ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/game-server-staging/${{ env.SERVICE_NAME }}:pr-latest \
+          .
+          
+    - name: Push Docker image
+      run: |
+        docker push ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/game-server-staging/${{ env.SERVICE_NAME }}:pr-${{ github.event.pull_request.number }}
+        docker push ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/game-server-staging/${{ env.SERVICE_NAME }}:pr-latest
+        
+    - name: Deploy to Cloud Run (Staging)
+      run: |
+        gcloud run deploy ${{ env.SERVICE_NAME }} \
+          --image ${{ env.REGISTRY }}/${{ env.PROJECT_ID }}/game-server-staging/${{ env.SERVICE_NAME }}:pr-${{ github.event.pull_request.number }} \
+          --region ${{ env.REGION }} \
+          --platform managed \
+          --allow-unauthenticated \
+          --port 3002 \
+          --memory 1Gi \
+          --cpu 1 \
+          --min-instances 0 \
+          --max-instances 10 \
+          --concurrency 1000 \
+          --timeout 3600 \
+          --set-env-vars NODE_ENV=staging,AUTH_SERVER_URL=${{ secrets.AUTH_SERVER_URL_STAGING }},MONGODB_URI=${{ secrets.MONGODB_URI_STAGING }},CLIENT_URL=${{ secrets.CLIENT_URL_STAGING }}
+          
+    - name: Get Cloud Run URL and comment on PR
+      run: |
+        SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} --region ${{ env.REGION }} --format 'value(status.url)')
+        
+        # Create comment body
+        COMMENT_BODY="🚀 **PR #${{ github.event.pull_request.number }} deployed to staging!**
+
+        **Deployment Details:**
+        - 📱 **Service URL:** $SERVICE_URL
+        - 🔌 **WebSocket URL:** ${SERVICE_URL/https:/wss:}/game
+        - ❤️ **Health Check:** $SERVICE_URL/health
+        - 🌐 **Custom Domain:** https://staging-server.organicfreshcoffee.com (if DNS is configured)
+        
+        **Testing:**
+        - Make sure to test your changes thoroughly
+        - Check both HTTP endpoints and WebSocket connections
+        - Verify game functionality works as expected
+        
+        **Branch:** \`${{ github.event.pull_request.head.ref }}\`
+        **Commit:** \`${{ github.event.pull_request.head.sha }}\`"
+        
+        # Post comment to PR using GitHub CLI
+        echo "$COMMENT_BODY" | gh pr comment ${{ github.event.pull_request.number }} --body-file -
+      env:
+        GH_TOKEN: ${{ github.token }}

@@ -26,6 +26,9 @@ app.use(cors({
     'https://organicfreshcoffee.com',
     'https://www.organicfreshcoffee.com',
     'https://server.organicfreshcoffee.com',
+    'https://staging.organicfreshcoffee.com',
+    'https://staging-api.organicfreshcoffee.com',
+    'https://staging-server.organicfreshcoffee.com',
     CLIENT_URL,
     'http://localhost:3000', // for development
     'http://localhost:3001',
