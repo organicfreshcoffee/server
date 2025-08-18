@@ -30,7 +30,7 @@ REGION="us-central1"
 # Environment-specific configuration
 if [ "$ENVIRONMENT" = "staging" ]; then
     SERVICE_NAME="organicfreshcoffee-game-server-staging"
-    SERVICE_ACCOUNT_NAME="github-actions-sa-staging"
+    SERVICE_ACCOUNT_NAME="github-actions-staging-sa"
     REPOSITORY_NAME="game-server-staging"
 else
     SERVICE_NAME="organicfreshcoffee-game-server"
@@ -137,7 +137,7 @@ create_service_account() {
         print_warning "Service account $SERVICE_ACCOUNT_NAME already exists"
     else
         gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME \
-            --display-name="GitHub Actions Service Account ($ENVIRONMENT)"
+            --display-name="GitHub SA $ENVIRONMENT"
         print_info "Service account created!"
     fi
     
@@ -170,7 +170,7 @@ setup_workload_identity() {
     else
         gcloud iam workload-identity-pools create "$POOL_NAME" \
             --location="global" \
-            --display-name="GitHub Actions Pool ($ENVIRONMENT)"
+            --display-name="GitHub Pool $ENVIRONMENT"
         print_info "Workload identity pool created!"
     fi
     
@@ -183,7 +183,7 @@ setup_workload_identity() {
         gcloud iam workload-identity-pools providers create-oidc "$PROVIDER_NAME" \
             --location="global" \
             --workload-identity-pool="$POOL_NAME" \
-            --display-name="GitHub Actions Provider ($ENVIRONMENT)" \
+            --display-name="GitHub Provider $ENVIRONMENT" \
             --attribute-mapping="google.subject=assertion.sub,attribute.actor=assertion.actor,attribute.repository=assertion.repository,attribute.repository_owner=assertion.repository_owner" \
             --attribute-condition="assertion.repository_owner == 'organicfreshcoffee'" \
             --issuer-uri="https://token.actions.githubusercontent.com"

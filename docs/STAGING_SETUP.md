@@ -46,13 +46,15 @@ This will:
 
 Add the following secrets to your GitHub repository:
 
-#### Staging Secrets
-- `GCP_PROJECT_ID_STAGING`: Your GCP project ID (usually same as production)
-- `SERVICE_ACCOUNT_EMAIL_STAGING`: Service account email from step 1
-- `WORKLOAD_IDENTITY_PROVIDER_STAGING`: Workload identity provider from step 1
-- `MONGODB_URI_STAGING`: MongoDB connection string for staging
-- `AUTH_SERVER_URL_STAGING`: Auth server URL for staging
-- `CLIENT_URL_STAGING`: Client app URL for staging (e.g., `https://staging.organicfreshcoffee.com`)
+### For Staging Environment:
+```
+GCP_PROJECT_ID_STAGING: (your GCP project ID)
+SERVICE_ACCOUNT_EMAIL_STAGING: github-actions-staging-sa@[PROJECT_ID].iam.gserviceaccount.com
+WORKLOAD_IDENTITY_PROVIDER_STAGING: (from setup-gcp.sh staging output)
+MONGODB_URI_STAGING: (your staging MongoDB connection string)
+AUTH_SERVER_URL_STAGING: (your staging auth server URL)
+CLIENT_URL_STAGING: https://staging.organicfreshcoffee.com
+```
 
 #### Existing Production Secrets (should already exist)
 - `GCP_PROJECT_ID`: Your GCP project ID
