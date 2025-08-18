@@ -2,6 +2,7 @@
 
 # Custom Domain Setup Script for Cloud Run
 # This script helps set up a custom domain for your Cloud Run service
+# Usage: ./setup-domain.sh [staging|production]
 
 set -e
 
@@ -12,15 +13,34 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Get environment argument
+ENVIRONMENT=${1:-production}
+
+# Validate environment
+if [[ "$ENVIRONMENT" != "staging" && "$ENVIRONMENT" != "production" ]]; then
+    echo -e "${RED}Error: Environment must be 'staging' or 'production'${NC}"
+    echo "Usage: $0 [staging|production]"
+    exit 1
+fi
+
 # Configuration
 PROJECT_ID=""
 REGION="us-central1"
-SERVICE_NAME="organicfreshcoffee-game-server"
-DOMAIN="server.organicfreshcoffee.com"
+
+# Environment-specific configuration
+if [ "$ENVIRONMENT" = "staging" ]; then
+    SERVICE_NAME="organicfreshcoffee-game-server-staging"
+    DOMAIN="staging-server.organicfreshcoffee.com"
+else
+    SERVICE_NAME="organicfreshcoffee-game-server"
+    DOMAIN="server.organicfreshcoffee.com"
+fi
 
 print_header() {
     echo -e "${BLUE}======================================${NC}"
     echo -e "${BLUE}  Custom Domain Setup for Cloud Run${NC}"
+    echo -e "${BLUE}  Environment: ${ENVIRONMENT}${NC}"
+    echo -e "${BLUE}  Domain: ${DOMAIN}${NC}"
     echo -e "${BLUE}======================================${NC}"
     echo ""
 }
@@ -161,7 +181,11 @@ configure_google_domains() {
     echo "3. Click on it and go to 'DNS' tab"
     echo "4. Scroll down to 'Custom records'"
     echo "5. Add a new CNAME record:"
-    echo "   - Host name: server"
+    
+    # Extract subdomain from full domain
+    SUBDOMAIN=$(echo "$DOMAIN" | sed 's/\.organicfreshcoffee\.com$//')
+    
+    echo "   - Host name: $SUBDOMAIN"
     echo "   - Type: CNAME"
     echo "   - TTL: 300"
     echo "   - Data: [The CNAME value shown above]"
