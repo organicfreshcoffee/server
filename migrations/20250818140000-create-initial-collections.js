@@ -1,18 +1,7 @@
-// Node.js MongoDB Migration Script
-const { MongoClient } = require('mongodb');
-
-async function initializeDatabase() {
-  const uri = process.env.MONGODB_URI || 'mongodb://admin:password@mongodb:27017/gamedb?authSource=admin';
-  const client = new MongoClient(uri);
-
-  try {
-    // Connect to MongoDB
-    await client.connect();
-    console.log('Connected to MongoDB');
-
-    // Get the gamedb database
-    const db = client.db('gamedb');
-
+module.exports = {
+  async up(db, client) {
+    console.log('Creating initial collections and indexes...');
+    
     // Create collections (MongoDB creates them automatically when first document is inserted)
     // But we can explicitly create them for clarity
     await db.createCollection('players').catch(err => {
@@ -35,15 +24,19 @@ async function initializeDatabase() {
 
     console.log('Indexes created');
     console.log('Game database initialized successfully');
+  },
 
-  } catch (error) {
-    console.error('Error during database initialization:', error);
-    process.exit(1);
-  } finally {
-    // Close the connection
-    await client.close();
+  async down(db, client) {
+    console.log('Removing collections and indexes...');
+    
+    // Drop collections (this also removes all indexes)
+    await db.collection('players').drop().catch(err => {
+      if (err.code !== 26) throw err; // Ignore "collection doesn't exist" error
+    });
+    await db.collection('game_sessions').drop().catch(err => {
+      if (err.code !== 26) throw err; // Ignore "collection doesn't exist" error
+    });
+    
+    console.log('Collections and indexes removed');
   }
-}
-
-// Run the initialization
-initializeDatabase();
+};

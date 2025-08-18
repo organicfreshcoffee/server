@@ -1,5 +1,5 @@
 import { MongoClient } from 'mongodb';
-import { DungeonService } from './src/services/dungeonService';
+import { DungeonService } from '../src/services/dungeonService';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -36,24 +36,9 @@ async function runMigration(): Promise<void> {
     
     console.log(`Deleted ${dungeonDeleteResult.deletedCount} dungeon nodes`);
     console.log(`Deleted ${floorDeleteResult.deletedCount} floor nodes`);
-    
-    // Initialize dungeon with new data
-    console.log('Initializing dungeon...');
-    
-    // We need to set up a temporary database connection for the service
-    // In a real migration, you'd pass the db instance to the service
-    process.env.MONGODB_DB_NAME = dbName;
-    process.env.MONGODB_URI = uri;
-    
-    // Import and set up database connection
-    const { connectToDatabase } = await import('./src/config/database');
-    await connectToDatabase();
-    
-    const dungeonService = new DungeonService();
-    await dungeonService.initializeDungeon();
-    
+
     // Close the database connection from the service to ensure clean state
-    const { closeDatabase } = await import('./src/config/database');
+    const { closeDatabase } = await import('../src/config/database');
     await closeDatabase();
     
     console.log('✅ Dungeon migration completed successfully!');

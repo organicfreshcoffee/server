@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install all dependencies (including migrate-mongo for migrations)
+RUN npm ci
 
 # Copy source code
 COPY . .
@@ -19,6 +19,10 @@ RUN npm run build
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nextjs -u 1001
+
+# Copy docker entrypoint script
+COPY docker-entrypoint.sh ./
+RUN chmod +x docker-entrypoint.sh
 
 # Change ownership
 RUN chown -R nextjs:nodejs /app
@@ -31,5 +35,6 @@ EXPOSE 3002
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD node healthcheck.js
 
-# Start the application
+# Set entrypoint to run migrations and start app
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["npm", "start"]
