@@ -27,10 +27,13 @@ done
 
 echo "Running migrations..."
 
-# Run database migrations
-npm run migrate:up
+# Run database migrations with error handling
+if ! npm run migrate:up; then
+  echo "❌ Migration failed - stopping application startup"
+  exit 1
+fi
 
-echo "Migrations completed. Starting application..."
+echo "✅ Migrations completed successfully. Starting application..."
 
 # Start the application
 exec "$@"
