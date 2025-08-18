@@ -10,25 +10,32 @@
     "clean": "rm -rf dist",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
-    "migrate:dungeon": "npx ts-node migrate-dungeon.ts",
-    "delete:dungeon": "npx ts-node delete-dungeon.ts",
-    "test:dungeon": "npx ts-node test-dungeon.ts"
+    
+    "migrate:up": "migrate-mongo up",
+    "migrate:down": "migrate-mongo down",
+    "migrate:status": "migrate-mongo status",
+    "migrate:create": "migrate-mongo create",
+    
+    "scripts:regenerate-dungeon": "npx ts-node scripts/regenerate-dungeon.ts",
+    "scripts:delete-dungeon": "npx ts-node scripts/delete-dungeon.ts",
+    "scripts:test-dungeon": "npx ts-node scripts/test-dungeon.ts"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "ws": "^8.16.0",
-    "mongodb": "^6.3.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
+    "express": "^4.18.2",
     "helmet": "^7.1.0",
-    "uuid": "^9.0.1"
+    "migrate-mongo": "^12.1.3",
+    "mongodb": "^6.3.0",
+    "uuid": "^9.0.1",
+    "ws": "^8.16.0"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/ws": "^8.5.10",
     "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
     "@types/node": "^20.10.6",
     "@types/uuid": "^9.0.7",
+    "@types/ws": "^8.5.10",
     "@typescript-eslint/eslint-plugin": "^6.17.0",
     "@typescript-eslint/parser": "^6.17.0",
     "eslint": "^8.56.0",

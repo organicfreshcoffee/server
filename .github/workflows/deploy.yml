@@ -54,6 +54,27 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run Database Migrations (Staging)
+      run: |
+        echo "🗄️ Running database migrations for staging..."
+        if ! npm run migrate:up; then
+          echo "❌ Migration failed - stopping deployment"
+          exit 1
+        fi
+        echo "✅ Migrations completed successfully"
+      env:
+        MONGODB_URI: ${{ secrets.MONGODB_URI_STAGING }}
+        MONGODB_DB_NAME: gamedb
+      
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
       with:
@@ -118,6 +139,27 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run Database Migrations (Production)
+      run: |
+        echo "🗄️ Running database migrations for production..."
+        if ! npm run migrate:up; then
+          echo "❌ Migration failed - stopping deployment"
+          exit 1
+        fi
+        echo "✅ Migrations completed successfully"
+      env:
+        MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        MONGODB_DB_NAME: gamedb
       
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2

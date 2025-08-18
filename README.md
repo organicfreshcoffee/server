@@ -54,7 +54,23 @@ MONGODB_URI=mongodb://admin:password@localhost:27018/gamedb?authSource=admin
 ./start.sh
 ```
 
-### 4. Access the Application
+**Note**: When running with Docker, migrations are automatically executed during startup. For local development without Docker:
+
+```bash
+# Start MongoDB locally first, then run:
+npm run migrate:up
+npm run dev
+```
+
+### 4. Initialize Dungeon Data (Optional)
+
+After the server is running, you can generate initial dungeon data:
+
+```bash
+npm run scripts:regenerate-dungeon
+```
+
+### 5. Access the Application
 
 - **Game Server API**: [http://localhost:3002](http://localhost:3002/)
 - **WebSocket Endpoint**: `ws://localhost:3002/game`
@@ -109,25 +125,57 @@ docker compose up -d mongodb
 - `npm run start` - Start production server
 - `npm run lint` - Run ESLint
 - `npm run lint:fix` - Fix ESLint errors
-- `npm run migrate:dungeon` - Initialize dungeon database tables and generate initial floors
-- `npm run test:dungeon` - Test the dungeon generation system
+- `npm run migrate:up` - Run database migrations
+- `npm run migrate:status` - Check migration status
+- `npm run scripts:regenerate-dungeon` - Regenerate dungeon data
+- `npm run scripts:test-dungeon` - Test dungeon system
 
 
-## Running the MongoDB Migrations
+## 🗄️ Database Migrations
 
-### Dungeon System Migration
-The dungeon generation system requires database initialization:
+This project uses **migrate-mongo** to manage database schema changes and versioning.
+
+### Creating and Running Migrations
 
 ```bash
-# Initialize dungeon tables and generate initial floors
-npm run migrate:dungeon
+# Check migration status
+npm run migrate:status
+
+# Run all pending migrations
+npm run migrate:up
+
+# Rollback the last migration
+npm run migrate:down
+
+# Create a new migration
+npm run migrate:create your-migration-name
 ```
 
-### Legacy Migration
-```
-docker build -f migration.Dockerfile -t db-migration .
-docker run --rm -e MONGODB_URI="your-mongodb-connection-string-here" db-migration
-```
+### Available Migrations
+
+The project includes these migrations:
+- **20250818140000-create-initial-collections.js** - Creates players and game_sessions collections with indexes
+- **20250818140001-add-player-rotation.js** - Adds rotation field to existing player records
+- **20250818140002-create-dungeon-collections.js** - Creates dungeon and floor collections with indexes
+
+### Environment Configuration
+
+Migrations use the same environment variables as the application:
+- `MONGODB_URI` - MongoDB connection string
+- `MONGODB_DB_NAME` - Database name (defaults to 'gamedb')
+
+## 🔧 Available Scripts
+
+### Migration Scripts
+- `npm run migrate:up` - Run all pending migrations
+- `npm run migrate:down` - Rollback the last migration
+- `npm run migrate:status` - Check which migrations have been applied
+- `npm run migrate:create` - Create a new migration file
+
+### Utility Scripts
+- `npm run scripts:regenerate-dungeon` - Clear and regenerate all dungeon data
+- `npm run scripts:delete-dungeon` - Delete all dungeon data
+- `npm run scripts:test-dungeon` - Test dungeon data integrity
 
 ## 🏗️ Project Structure
 
@@ -149,13 +197,19 @@ server/
 │   ├── types/                 # TypeScript type definitions
 │   │   └── game.ts            # Game-related types (including dungeon types)
 │   └── index.ts               # Server entry point
-├── migrate-dungeon.ts         # Dungeon database migration
-├── test-dungeon.ts            # Dungeon system test script
+├── migrations/                # Database migrations (migrate-mongo)
+│   ├── 20250818140000-create-initial-collections.js
+│   ├── 20250818140001-add-player-rotation.js
+│   └── 20250818140002-create-dungeon-collections.js
+├── scripts/                   # Utility scripts
+│   ├── regenerate-dungeon.ts  # Regenerate dungeon data
+│   ├── delete-dungeon.ts      # Delete dungeon data
+│   └── test-dungeon.ts        # Test dungeon system
+├── migrate-mongo-config.js    # Migration configuration
 ├── docker-compose.yml         # Docker services
 ├── docker-compose.prod.yml    # Production Docker services
 ├── Dockerfile                 # Container configuration
 ├── Dockerfile.prod            # Production container
-├── init-mongo.js              # MongoDB initialization
 ├── setup.sh                   # Setup script
 ├── start.sh                   # Start script
 ├── healthcheck.js             # Docker health check

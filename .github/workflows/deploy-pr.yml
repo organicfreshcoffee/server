@@ -46,6 +46,18 @@ jobs:
     - name: Build TypeScript
       run: npm run build
       
+    - name: Run Database Migrations (Staging)
+      run: |
+        echo "🗄️ Running database migrations for PR staging environment..."
+        if ! npm run migrate:up; then
+          echo "❌ Migration failed - stopping PR deployment"
+          exit 1
+        fi
+        echo "✅ Migrations completed successfully"
+      env:
+        MONGODB_URI: ${{ secrets.MONGODB_URI_STAGING }}
+        MONGODB_DB_NAME: gamedb
+      
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
       with:
@@ -95,6 +107,9 @@ jobs:
         - 🔌 **WebSocket URL:** ${SERVICE_URL/https:/wss:}/game
         - ❤️ **Health Check:** $SERVICE_URL/health
         - 🌐 **Custom Domain:** https://staging-server.organicfreshcoffee.com (if DNS is configured)
+        
+        **Database:**
+        - ✅ **Migrations:** Applied successfully to staging database
         
         **Testing:**
         - Make sure to test your changes thoroughly
