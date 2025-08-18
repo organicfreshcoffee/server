@@ -108,9 +108,3 @@ jobs:
         echo "$COMMENT_BODY" | gh pr comment ${{ github.event.pull_request.number }} --body-file -
       env:
         GH_TOKEN: ${{ github.token }}
-        
-    - name: Add deployment status label
-      run: |
-        gh pr edit ${{ github.event.pull_request.number }} --add-label "deployed-staging"
-      env:
-        GH_TOKEN: ${{ github.token }}
