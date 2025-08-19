@@ -1,4 +1,5 @@
-# Use Node.js 18 Alpine as base image
+# WSL-Compatible Dockerfile
+# This version avoids user switching issues common in WSL environments
 FROM node:18-alpine
 
 # Set working directory
@@ -20,16 +21,8 @@ RUN npm run build
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 
-# Create non-root user and group - WSL compatible approach
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001 -G nodejs
-
-# Change ownership of the entire app directory - more robust for WSL
-RUN chown -R nextjs:nodejs /app && \
-    chmod -R 755 /app
-
-# Switch to non-root user
-USER nextjs
+# Ensure all files have proper permissions for container execution
+RUN chmod -R 755 /app
 
 # Expose port
 EXPOSE 3002
