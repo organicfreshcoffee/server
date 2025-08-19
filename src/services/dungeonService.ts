@@ -1,7 +1,8 @@
 import { getDatabase } from '../config/database';
 import { DungeonDagNode, FloorDagNode, FloorLayout, RoomStairs } from '../types/game';
 import { ServerFloorGenerator } from './floorGenerator';
-import { GeneratedFloorData } from '../types/floorGeneration';
+import { GeneratedFloorData, GeneratedFloorTileData, FloorTileCoordinates } from '../types/floorGeneration';
+import { WallGenerator } from './wallGenerator';
 
 /**
  * DungeonService manages the procedural generation of dungeon structures using two separate DAGs:
@@ -562,6 +563,56 @@ export class DungeonService {
       return generatedData;
     } catch (error) {
       console.error('Error generating floor data:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get complete tile data for rendering (floors, walls, stairs, ceiling)
+   * This is the most comprehensive endpoint for client rendering
+   */
+  async getGeneratedFloorTileData(dungeonDagNodeName: string): Promise<GeneratedFloorTileData | null> {
+    // First get the generated floor data
+    const generatedData = await this.getGeneratedFloorData(dungeonDagNodeName);
+    
+    if (!generatedData) {
+      return null;
+    }
+
+    try {
+      // Get all floor tiles
+      const floorTiles = generatedData.floorTiles;
+      
+      // Generate stair tiles from rooms
+      const { upwardStairs, downwardStairs } = WallGenerator.generateStairTiles(generatedData.rooms);
+      
+      // Generate wall tiles (excluding stair positions to avoid blocking stairs)
+      const allStairPositions = [...upwardStairs, ...downwardStairs];
+      const wallTiles = WallGenerator.generateWalls(floorTiles, allStairPositions, {
+        includeCorners: true,
+        includeCeiling: false
+      });
+
+      const tileCoordinates: FloorTileCoordinates = {
+        floorTiles,
+        wallTiles,
+        upwardStairTiles: upwardStairs,
+        downwardStairTiles: downwardStairs
+      };
+
+      console.log(`🎯 Generated complete tile data for ${dungeonDagNodeName}:`);
+      console.log(`  - Floor tiles: ${floorTiles.length}`);
+      console.log(`  - Wall tiles: ${wallTiles.length}`);
+      console.log(`  - Upward stairs: ${upwardStairs.length}`);
+      console.log(`  - Downward stairs: ${downwardStairs.length}`);
+
+      return {
+        dungeonDagNodeName,
+        bounds: generatedData.bounds,
+        tiles: tileCoordinates
+      };
+    } catch (error) {
+      console.error('Error generating complete tile data:', error);
       return null;
     }
   }

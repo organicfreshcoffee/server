@@ -291,6 +291,46 @@ router.get('/generated-floor/:dungeonDagNodeName', async (req: AuthenticatedRequ
 });
 
 /**
+ * Get complete tile coordinates for rendering (floors, walls, stairs, ceiling)
+ * This is the most comprehensive endpoint providing all tile coordinates for client rendering
+ * GET /api/dungeon/generated-floor-tiles/:dungeonDagNodeName
+ */
+router.get('/generated-floor-tiles/:dungeonDagNodeName', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const { dungeonDagNodeName } = req.params;
+
+    if (!dungeonDagNodeName) {
+      res.status(400).json({
+        success: false,
+        error: 'dungeonDagNodeName is required'
+      });
+      return;
+    }
+
+    const tileData = await dungeonService.getGeneratedFloorTileData(dungeonDagNodeName);
+
+    if (!tileData) {
+      res.status(404).json({
+        success: false,
+        error: 'Floor not found or could not generate tile data'
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      data: tileData
+    });
+  } catch (error) {
+    console.error('Error in get-generated-floor-tiles:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
  * Get total player count across all floors
  * GET /api/dungeon/player-count
  */

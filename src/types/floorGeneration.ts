@@ -13,6 +13,11 @@ export interface CubePosition {
   y: number;
 }
 
+// Floor tile with type information for proper texturing
+export interface FloorTile extends CubePosition {
+  type: 'room' | 'hallway';
+}
+
 export interface ServerRoom {
   id: string;
   name: string;
@@ -50,11 +55,16 @@ export interface ServerHallway {
   segments?: FloorHallwaySegment[];
 }
 
+export interface FloorBounds {
+  width: number;
+  height: number;
+}
+
 export interface ServerFloorLayout {
   dungeonDagNodeName: string;
   rooms: ServerRoom[];
   hallways: ServerHallway[];
-  bounds: { width: number; height: number };
+  bounds: FloorBounds;
   nodeMap: Map<string, ServerRoom | ServerHallway>;
   rootNode: string;
 }
@@ -63,11 +73,25 @@ export interface GeneratedFloorData {
   dungeonDagNodeName: string;
   rooms: ServerRoom[];
   hallways: ServerHallway[];
-  bounds: { width: number; height: number };
+  bounds: FloorBounds;
   rootNode: string;
-  floorTiles: CubePosition[];
-  roomTiles: Map<string, CubePosition[]>;
-  hallwayTiles: Map<string, CubePosition[]>;
+  floorTiles: FloorTile[];
+  roomTiles: Map<string, FloorTile[]>;
+  hallwayTiles: Map<string, FloorTile[]>;
+}
+
+// New interface for complete tile data with rendering coordinates
+export interface FloorTileCoordinates {
+  floorTiles: FloorTile[];
+  wallTiles: CubePosition[];
+  upwardStairTiles: CubePosition[];
+  downwardStairTiles: CubePosition[];
+}
+
+export interface GeneratedFloorTileData {
+  dungeonDagNodeName: string;
+  bounds: FloorBounds;
+  tiles: FloorTileCoordinates;
 }
 
 export interface HallwayGenerationOptions {
