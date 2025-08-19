@@ -2,6 +2,7 @@ import { FloorDagNode, FloorLayout } from '../types/game';
 import { 
   Vector2, 
   CubePosition, 
+  FloorTile,
   ServerRoom, 
   ServerHallway, 
   GeneratedFloorData,
@@ -55,17 +56,20 @@ export class ServerFloorGenerator {
     // Calculate bounds
     const bounds = this.calculateBounds(rooms, hallways);
     
-    // Generate floor tiles
-    const roomTiles = this.generateRoomTiles(rooms);
+    // Calculate downward stair positions first to exclude from floor tiles
+    const downwardStairPositions = this.getDownwardStairPositions(rooms);
+    
+    // Generate floor tiles with type information (excluding downward stair positions)
+    const roomTiles = this.generateRoomTiles(rooms, downwardStairPositions);
     const hallwayTiles = ServerHallwayGenerator.generateMultipleHallwayFloors(hallways);
     
-    // Combine all floor tiles
-    const allFloorTiles: CubePosition[] = [];
+    // Combine all floor tiles with type information
+    const allFloorTiles: FloorTile[] = [];
     roomTiles.forEach(tiles => allFloorTiles.push(...tiles));
     hallwayTiles.forEach(tiles => allFloorTiles.push(...tiles));
     
-    // Remove duplicates
-    const uniqueFloorTiles = this.removeDuplicateCoordinates(allFloorTiles);
+    // Remove duplicates (preserving type information)
+    const uniqueFloorTiles = this.removeDuplicateFloorTiles(allFloorTiles);
     
     console.log(`🏗️ Generated layout: ${rooms.length} rooms, ${hallways.length} hallways, ${uniqueFloorTiles.length} floor tiles`);
     
@@ -378,15 +382,25 @@ export class ServerFloorGenerator {
   /**
    * Generate floor tiles for all rooms
    */
-  private static generateRoomTiles(rooms: ServerRoom[]): Map<string, CubePosition[]> {
-    const roomTiles = new Map<string, CubePosition[]>();
+  private static generateRoomTiles(rooms: ServerRoom[], excludePositions: CubePosition[] = []): Map<string, FloorTile[]> {
+    const roomTiles = new Map<string, FloorTile[]>();
+    
+    // Create a set of excluded positions for quick lookup
+    const excludedPositions = new Set<string>();
+    excludePositions.forEach(pos => {
+      excludedPositions.add(`${pos.x},${pos.y}`);
+    });
     
     rooms.forEach(room => {
-      const tiles: CubePosition[] = [];
+      const tiles: FloorTile[] = [];
       
       for (let x = room.position.x; x < room.position.x + room.width; x++) {
         for (let y = room.position.y; y < room.position.y + room.height; y++) {
-          tiles.push({ x, y });
+          const posKey = `${x},${y}`;
+          // Only add the floor tile if it's not an excluded position (like a downward stair)
+          if (!excludedPositions.has(posKey)) {
+            tiles.push({ x, y, type: 'room' });
+          }
         }
       }
       
@@ -394,6 +408,26 @@ export class ServerFloorGenerator {
     });
     
     return roomTiles;
+  }
+
+  /**
+   * Get all downward stair positions from rooms
+   */
+  private static getDownwardStairPositions(rooms: ServerRoom[]): CubePosition[] {
+    const stairPositions: CubePosition[] = [];
+    
+    rooms.forEach(room => {
+      if (room.hasDownwardStair && 
+          room.stairLocationX !== undefined && 
+          room.stairLocationY !== undefined) {
+        stairPositions.push({
+          x: room.position.x + room.stairLocationX,
+          y: room.position.y + room.stairLocationY
+        });
+      }
+    });
+    
+    return stairPositions;
   }
 
   /**
@@ -408,6 +442,26 @@ export class ServerFloorGenerator {
     });
     
     return Array.from(uniqueCoords.values());
+  }
+
+  /**
+   * Remove duplicate floor tiles (preserving type information)
+   * If there's a duplicate, room tiles take precedence over hallway tiles
+   */
+  private static removeDuplicateFloorTiles(tiles: FloorTile[]): FloorTile[] {
+    const uniqueTiles = new Map<string, FloorTile>();
+    
+    tiles.forEach(tile => {
+      const key = `${tile.x},${tile.y}`;
+      const existing = uniqueTiles.get(key);
+      
+      // If no existing tile, or existing is hallway and new is room, use the new one
+      if (!existing || (existing.type === 'hallway' && tile.type === 'room')) {
+        uniqueTiles.set(key, tile);
+      }
+    });
+    
+    return Array.from(uniqueTiles.values());
   }
 }
 
@@ -428,7 +482,7 @@ export class ServerHallwayGenerator {
   static generateHallwayFloor(
     hallway: ServerHallway,
     options: HallwayGenerationOptions = {}
-  ): CubePosition[] {
+  ): FloorTile[] {
     const opts = { ...this.DEFAULT_OPTIONS, ...options };
     
     if (!hallway.segments || hallway.segments.length === 0) {
@@ -436,7 +490,7 @@ export class ServerHallwayGenerator {
       return [];
     }
 
-    let coordinates: CubePosition[] = [];
+    let coordinates: FloorTile[] = [];
     
     // Generate coordinates for each segment
     hallway.segments.forEach(segment => {
@@ -446,7 +500,7 @@ export class ServerHallwayGenerator {
 
     // Remove duplicates to avoid overlaps
     if (opts.minimizeOverlaps) {
-      coordinates = this.removeDuplicateCoordinates(coordinates);
+      coordinates = this.removeDuplicateFloorTiles(coordinates);
     }
 
     console.log(`🛤️ Generated ${coordinates.length} floor cubes for hallway ${hallway.name}`);
@@ -459,9 +513,9 @@ export class ServerHallwayGenerator {
   static generateMultipleHallwayFloors(
     hallways: ServerHallway[],
     options: HallwayGenerationOptions = {}
-  ): Map<string, CubePosition[]> {
+  ): Map<string, FloorTile[]> {
     const opts = { ...this.DEFAULT_OPTIONS, ...options };
-    const hallwayFloors = new Map<string, CubePosition[]>();
+    const hallwayFloors = new Map<string, FloorTile[]>();
     
     hallways.forEach(hallway => {
       const coordinates = this.generateHallwayFloor(hallway, opts);
@@ -477,8 +531,8 @@ export class ServerHallwayGenerator {
   private static generateSegmentCoordinates(
     segment: FloorHallwaySegment,
     width: number
-  ): CubePosition[] {
-    const coordinates: CubePosition[] = [];
+  ): FloorTile[] {
+    const coordinates: FloorTile[] = [];
     const { start, end } = segment;
     
     // Calculate direction and length
@@ -530,15 +584,15 @@ export class ServerHallwayGenerator {
     centerY: number,
     width: number,
     perpDirection: Vector2
-  ): CubePosition[] {
-    const coordinates: CubePosition[] = [];
+  ): FloorTile[] {
+    const coordinates: FloorTile[] = [];
     
     for (let w = 0; w < width; w++) {
       const widthOffset = w - Math.floor(width / 2);
       const finalX = Math.round(centerX + perpDirection.x * widthOffset);
       const finalY = Math.round(centerY + perpDirection.y * widthOffset);
       
-      coordinates.push({ x: finalX, y: finalY });
+      coordinates.push({ x: finalX, y: finalY, type: 'hallway' });
     }
     
     return coordinates;
@@ -556,5 +610,19 @@ export class ServerHallwayGenerator {
     });
     
     return Array.from(uniqueCoords.values());
+  }
+
+  /**
+   * Remove duplicate floor tiles (preserving type information)
+   */
+  private static removeDuplicateFloorTiles(tiles: FloorTile[]): FloorTile[] {
+    const uniqueTiles = new Map<string, FloorTile>();
+    
+    tiles.forEach(tile => {
+      const key = `${tile.x},${tile.y}`;
+      uniqueTiles.set(key, tile);
+    });
+    
+    return Array.from(uniqueTiles.values());
   }
 }
