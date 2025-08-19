@@ -4,7 +4,6 @@ import {
   CubePosition, 
   ServerRoom, 
   ServerHallway, 
-  ServerFloorLayout, 
   GeneratedFloorData,
   FloorHallwaySegment,
   HallwayGenerationOptions
