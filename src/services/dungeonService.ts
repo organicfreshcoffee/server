@@ -1,5 +1,7 @@
 import { getDatabase } from '../config/database';
 import { DungeonDagNode, FloorDagNode, FloorLayout, RoomStairs } from '../types/game';
+import { ServerFloorGenerator } from './floorGenerator';
+import { GeneratedFloorData } from '../types/floorGeneration';
 
 /**
  * DungeonService manages the procedural generation of dungeon structures using two separate DAGs:
@@ -541,5 +543,26 @@ export class DungeonService {
     );
     
     return root.name;
+  }
+
+  /**
+   * Get generated floor data with positioned rooms, hallways, and floor tiles
+   */
+  async getGeneratedFloorData(dungeonDagNodeName: string): Promise<GeneratedFloorData | null> {
+    // First get the raw floor layout
+    const floorLayout = await this.getFloor(dungeonDagNodeName);
+    
+    if (!floorLayout) {
+      return null;
+    }
+    
+    // Process the DAG data into positioned layout with floor tiles
+    try {
+      const generatedData = ServerFloorGenerator.processFloorLayout(floorLayout);
+      return generatedData;
+    } catch (error) {
+      console.error('Error generating floor data:', error);
+      return null;
+    }
   }
 }
