@@ -13,6 +13,11 @@ export interface CubePosition {
   y: number;
 }
 
+export interface StairTile extends CubePosition {
+  room_id: string;
+  room_name: string;
+}
+
 // Floor tile with type information for proper texturing
 export interface FloorTile extends CubePosition {
   type: 'room' | 'hallway';
@@ -84,8 +89,8 @@ export interface GeneratedFloorData {
 export interface FloorTileCoordinates {
   floorTiles: FloorTile[];
   wallTiles: CubePosition[];
-  upwardStairTiles: CubePosition[];
-  downwardStairTiles: CubePosition[];
+  upwardStairTiles: StairTile[];
+  downwardStairTiles: StairTile[];
 }
 
 export interface GeneratedFloorTileData {

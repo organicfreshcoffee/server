@@ -1,4 +1,4 @@
-import { FloorTile, CubePosition } from '../types/floorGeneration';
+import { FloorTile, CubePosition, StairTile } from '../types/floorGeneration';
 
 export interface WallGenerationOptions {
   includeCorners?: boolean;
@@ -90,15 +90,17 @@ export class WallGenerator {
    */
   static generateStairTiles(
     rooms: Array<{
+      id: string;
+      name: string;
       position: { x: number; y: number };
       hasUpwardStair?: boolean;
       hasDownwardStair?: boolean;
       stairLocationX?: number;
       stairLocationY?: number;
     }>
-  ): { upwardStairs: CubePosition[]; downwardStairs: CubePosition[] } {
-    const upwardStairs: CubePosition[] = [];
-    const downwardStairs: CubePosition[] = [];
+  ): { upwardStairs: StairTile[]; downwardStairs: StairTile[] } {
+    const upwardStairs: StairTile[] = [];
+    const downwardStairs: StairTile[] = [];
 
     rooms.forEach(room => {
       if ((room.hasUpwardStair || room.hasDownwardStair) && 
@@ -107,7 +109,9 @@ export class WallGenerator {
         
         const stairTile = {
           x: room.position.x + room.stairLocationX,
-          y: room.position.y + room.stairLocationY
+          y: room.position.y + room.stairLocationY,
+          room_id: room.id,
+          room_name: room.name
         };
 
         if (room.hasUpwardStair) {

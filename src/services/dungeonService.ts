@@ -587,7 +587,7 @@ export class DungeonService {
       const { upwardStairs, downwardStairs } = WallGenerator.generateStairTiles(generatedData.rooms);
       
       // Generate wall tiles (excluding stair positions to avoid blocking stairs)
-      const allStairPositions = [...upwardStairs, ...downwardStairs];
+      const allStairPositions = [...upwardStairs, ...downwardStairs].map(stair => ({ x: stair.x, y: stair.y }));
       const wallTiles = WallGenerator.generateWalls(floorTiles, allStairPositions, {
         includeCorners: true,
         includeCeiling: false
