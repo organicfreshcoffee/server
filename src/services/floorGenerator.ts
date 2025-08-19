@@ -56,8 +56,11 @@ export class ServerFloorGenerator {
     // Calculate bounds
     const bounds = this.calculateBounds(rooms, hallways);
     
-    // Generate floor tiles with type information
-    const roomTiles = this.generateRoomTiles(rooms);
+    // Calculate downward stair positions first to exclude from floor tiles
+    const downwardStairPositions = this.getDownwardStairPositions(rooms);
+    
+    // Generate floor tiles with type information (excluding downward stair positions)
+    const roomTiles = this.generateRoomTiles(rooms, downwardStairPositions);
     const hallwayTiles = ServerHallwayGenerator.generateMultipleHallwayFloors(hallways);
     
     // Combine all floor tiles with type information
@@ -379,15 +382,25 @@ export class ServerFloorGenerator {
   /**
    * Generate floor tiles for all rooms
    */
-  private static generateRoomTiles(rooms: ServerRoom[]): Map<string, FloorTile[]> {
+  private static generateRoomTiles(rooms: ServerRoom[], excludePositions: CubePosition[] = []): Map<string, FloorTile[]> {
     const roomTiles = new Map<string, FloorTile[]>();
+    
+    // Create a set of excluded positions for quick lookup
+    const excludedPositions = new Set<string>();
+    excludePositions.forEach(pos => {
+      excludedPositions.add(`${pos.x},${pos.y}`);
+    });
     
     rooms.forEach(room => {
       const tiles: FloorTile[] = [];
       
       for (let x = room.position.x; x < room.position.x + room.width; x++) {
         for (let y = room.position.y; y < room.position.y + room.height; y++) {
-          tiles.push({ x, y, type: 'room' });
+          const posKey = `${x},${y}`;
+          // Only add the floor tile if it's not an excluded position (like a downward stair)
+          if (!excludedPositions.has(posKey)) {
+            tiles.push({ x, y, type: 'room' });
+          }
         }
       }
       
@@ -395,6 +408,26 @@ export class ServerFloorGenerator {
     });
     
     return roomTiles;
+  }
+
+  /**
+   * Get all downward stair positions from rooms
+   */
+  private static getDownwardStairPositions(rooms: ServerRoom[]): CubePosition[] {
+    const stairPositions: CubePosition[] = [];
+    
+    rooms.forEach(room => {
+      if (room.hasDownwardStair && 
+          room.stairLocationX !== undefined && 
+          room.stairLocationY !== undefined) {
+        stairPositions.push({
+          x: room.position.x + room.stairLocationX,
+          y: room.position.y + room.stairLocationY
+        });
+      }
+    });
+    
+    return stairPositions;
   }
 
   /**
