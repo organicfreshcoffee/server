@@ -21,7 +21,20 @@ Before you begin, ensure you have the following installed:
 
 ## 🚀 Quick Start
 
-### 1. Clone and Setup
+### For WSL Users
+
+If you're using Windows Subsystem for Linux (WSL) and experiencing Docker build issues, please use the WSL-specific setup:
+
+```bash
+./setup-wsl.sh   # Setup and start services
+./start-wsl.sh   # Start services (if stopped)
+```
+
+For detailed WSL troubleshooting and configuration, see [WSL Setup Guide](docs/WSL_SETUP.md).
+
+### Standard Setup
+
+#### 1. Clone and Setup
 
 ```bash
 git clone https://github.com/organicfreshcoffee/server.git
@@ -29,7 +42,7 @@ cd server
 ./setup.sh
 ```
 
-### 2. Configure Environment
+#### 2. Configure Environment
 
 The setup script will create a `.env` file from the template. Review and update it:
 
@@ -48,7 +61,7 @@ CLIENT_URL=http://localhost:3000
 MONGODB_URI=mongodb://admin:password@localhost:27018/gamedb?authSource=admin
 ```
 
-### 3. Start the Server
+#### 3. Start the Server
 
 ```bash
 ./start.sh
@@ -62,7 +75,7 @@ npm run migrate:up
 npm run dev
 ```
 
-### 4. Initialize Dungeon Data (Optional)
+#### 4. Initialize Dungeon Data (Optional)
 
 After the server is running, you can generate initial dungeon data:
 
@@ -70,7 +83,7 @@ After the server is running, you can generate initial dungeon data:
 npm run scripts:regenerate-dungeon
 ```
 
-### 5. Access the Application
+#### 5. Access the Application
 
 - **Game Server API**: [http://localhost:3002](http://localhost:3002/)
 - **WebSocket Endpoint**: `ws://localhost:3002/game`
