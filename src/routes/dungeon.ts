@@ -338,4 +338,25 @@ router.get('/player-count', async (req: AuthenticatedRequest, res): Promise<void
   }
 });
 
+/**
+ * Get enemy count by floor (only returns floors with enemies)
+ * GET /api/dungeon/enemy-count
+ */
+router.get('/enemy-count', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const enemyData = await enemyService.getEnemyCountsByFloor();
+
+    res.json({
+      success: true,
+      data: enemyData
+    });
+  } catch (error) {
+    console.error('Error in get-enemy-count:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
 export default router;

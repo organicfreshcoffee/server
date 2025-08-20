@@ -30,6 +30,44 @@ export class EnemyService {
   }
 
   /**
+   * Get enemy counts by floor (only returns floors with enemies)
+   */
+  async getEnemyCountsByFloor(): Promise<{ totalEnemies: number; enemiesByFloor: Record<string, number> }> {
+    const db = getDatabase();
+    
+    // Aggregate enemies by floor using MongoDB aggregation
+    const enemyCountsByFloor = await db.collection('enemies').aggregate([
+      {
+        $group: {
+          _id: '$floorName',
+          count: { $sum: 1 }
+        }
+      },
+      {
+        $project: {
+          _id: 0,
+          floorName: '$_id',
+          enemyCount: '$count'
+        }
+      }
+    ]).toArray();
+
+    // Convert to key-value pairs for easier consumption
+    const enemiesByFloor: Record<string, number> = {};
+    let totalEnemies = 0;
+
+    enemyCountsByFloor.forEach(floor => {
+      enemiesByFloor[floor.floorName] = floor.enemyCount;
+      totalEnemies += floor.enemyCount;
+    });
+
+    return {
+      totalEnemies,
+      enemiesByFloor
+    };
+  }
+
+  /**
    * Get all enemy types from the database
    */
   async getEnemyTypes(): Promise<EnemyType[]> {
