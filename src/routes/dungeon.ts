@@ -245,52 +245,6 @@ router.get('/spawn', async (req: AuthenticatedRequest, res): Promise<void> => {
 });
 
 /**
- * Get generated floor data with positioned rooms, hallways, and floor tiles
- * GET /api/dungeon/generated-floor/:dungeonDagNodeName
- */
-router.get('/generated-floor/:dungeonDagNodeName', async (req: AuthenticatedRequest, res): Promise<void> => {
-  try {
-    const { dungeonDagNodeName } = req.params;
-
-    if (!dungeonDagNodeName) {
-      res.status(400).json({
-        success: false,
-        error: 'dungeonDagNodeName is required'
-      });
-      return;
-    }
-
-    const generatedFloorData = await dungeonService.getGeneratedFloorData(dungeonDagNodeName);
-
-    if (!generatedFloorData) {
-      res.status(404).json({
-        success: false,
-        error: 'Floor not found or could not be generated'
-      });
-      return;
-    }
-
-    // Convert Map objects to plain objects for JSON serialization
-    const response = {
-      ...generatedFloorData,
-      roomTiles: Object.fromEntries(generatedFloorData.roomTiles),
-      hallwayTiles: Object.fromEntries(generatedFloorData.hallwayTiles)
-    };
-
-    res.json({
-      success: true,
-      data: response
-    });
-  } catch (error) {
-    console.error('Error in get-generated-floor:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error'
-    });
-  }
-});
-
-/**
  * Get complete tile coordinates for rendering (floors, walls, stairs, ceiling)
  * This is the most comprehensive endpoint providing all tile coordinates for client rendering
  * GET /api/dungeon/generated-floor-tiles/:dungeonDagNodeName
