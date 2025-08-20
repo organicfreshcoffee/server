@@ -26,10 +26,10 @@ export class EnemyService {
   private readonly CUBE_SIZE = 5;
   private readonly ENEMY_LIFETIME_MS = 5 * 60 * 1000; // 5 minutes
   private movementBroadcastInterval: NodeJS.Timeout | null = null;
+  private isUpdateLoopRunning = false;
 
   constructor() {
-    // Start the main enemy update loop that handles both movement and cleanup
-    this.startEnemyUpdateLoop();
+    // Don't start the update loop immediately - it will start when first enemy is spawned
   }
 
   /**
@@ -104,6 +104,11 @@ export class EnemyService {
 
     await db.collection('enemies').insertOne(enemy);
     
+    // Start the update loop if it's not already running
+    if (!this.isUpdateLoopRunning) {
+      this.startEnemyUpdateLoop();
+    }
+    
     // Send WebSocket message to all clients on this floor about the new enemy
     broadcastToFloor(floorName, {
       type: 'enemy-spawned',
@@ -121,6 +126,11 @@ export class EnemyService {
    * Start the main enemy update loop that handles movement and cleanup
    */
   private startEnemyUpdateLoop(): void {
+    if (this.isUpdateLoopRunning) {
+      return; // Already running
+    }
+    
+    this.isUpdateLoopRunning = true;
     this.movementBroadcastInterval = setInterval(async () => {
       try {
         await this.updateEnemies();
@@ -128,6 +138,20 @@ export class EnemyService {
         console.error('Error in enemy update loop:', error);
       }
     }, 1000); // Update every second
+    
+    console.log('Enemy update loop started');
+  }
+
+  /**
+   * Stop the enemy update loop
+   */
+  private stopEnemyUpdateLoop(): void {
+    if (this.movementBroadcastInterval) {
+      clearInterval(this.movementBroadcastInterval);
+      this.movementBroadcastInterval = null;
+      this.isUpdateLoopRunning = false;
+      console.log('Enemy update loop stopped - no enemies remaining');
+    }
   }
 
   /**
@@ -139,6 +163,12 @@ export class EnemyService {
     
     // Get all enemies
     const enemies = await db.collection('enemies').find({}).toArray();
+    
+    // If no enemies exist, stop the update loop
+    if (enemies.length === 0) {
+      this.stopEnemyUpdateLoop();
+      return;
+    }
     
     // Group enemies by floor for broadcasting
     const enemiesByFloor = new Map<string, any[]>();
@@ -207,6 +237,13 @@ export class EnemyService {
     // Delete expired enemies
     for (const enemyId of enemiesToDelete) {
       await this.deleteEnemy(enemyId);
+    }
+    
+    // Check if we should stop the loop after deletions
+    const remainingEnemies = await db.collection('enemies').countDocuments({});
+    if (remainingEnemies === 0) {
+      this.stopEnemyUpdateLoop();
+      return;
     }
     
     // Broadcast movements to each floor
@@ -324,6 +361,7 @@ export class EnemyService {
     if (this.movementBroadcastInterval) {
       clearInterval(this.movementBroadcastInterval);
       this.movementBroadcastInterval = null;
+      this.isUpdateLoopRunning = false;
     }
   }
 }
