@@ -7,3 +7,7 @@ import { EnemyService } from './enemyService';
 export const dungeonService = new DungeonService();
 export const playerService = new PlayerService();
 export const enemyService = new EnemyService();
+
+// Re-export types for convenience
+export type { EnemyInterface, EnemyType } from './enemyService';
+export type { EnemyData } from './enemy';
