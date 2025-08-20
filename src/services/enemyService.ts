@@ -24,7 +24,13 @@ export interface EnemyType {
 
 export class EnemyService {
   private readonly CUBE_SIZE = 5;
-  private enemyTimers: Map<string, NodeJS.Timeout> = new Map();
+  private readonly ENEMY_LIFETIME_MS = 5 * 60 * 1000; // 5 minutes
+  private movementBroadcastInterval: NodeJS.Timeout | null = null;
+
+  constructor() {
+    // Start the main enemy update loop that handles both movement and cleanup
+    this.startEnemyUpdateLoop();
+  }
 
   /**
    * Check if there are enemies on a floor
@@ -98,9 +104,6 @@ export class EnemyService {
 
     await db.collection('enemies').insertOne(enemy);
     
-    // Start the 5-minute timer for this enemy
-    this.startEnemyTimer(enemy.id);
-    
     // Send WebSocket message to all clients on this floor about the new enemy
     broadcastToFloor(floorName, {
       type: 'enemy-spawned',
@@ -115,20 +118,109 @@ export class EnemyService {
   }
 
   /**
-   * Start a 5-minute timer to delete an enemy
+   * Start the main enemy update loop that handles movement and cleanup
    */
-  private startEnemyTimer(enemyId: string): void {
-    const timer = setTimeout(async () => {
+  private startEnemyUpdateLoop(): void {
+    this.movementBroadcastInterval = setInterval(async () => {
       try {
-        await this.deleteEnemy(enemyId);
-        this.enemyTimers.delete(enemyId);
-        console.log(`Enemy ${enemyId} deleted after 5 minutes`);
+        await this.updateEnemies();
       } catch (error) {
-        console.error(`Error deleting enemy ${enemyId}:`, error);
+        console.error('Error in enemy update loop:', error);
       }
-    }, 5 * 60 * 1000); // 5 minutes in milliseconds
+    }, 1000); // Update every second
+  }
 
-    this.enemyTimers.set(enemyId, timer);
+  /**
+   * Update all enemies: handle movement, check for expiration, and broadcast
+   */
+  private async updateEnemies(): Promise<void> {
+    const db = getDatabase();
+    const now = new Date();
+    
+    // Get all enemies
+    const enemies = await db.collection('enemies').find({}).toArray();
+    
+    // Group enemies by floor for broadcasting
+    const enemiesByFloor = new Map<string, any[]>();
+    const enemiesToDelete: string[] = [];
+    
+    for (const enemy of enemies) {
+      // Check if enemy should be deleted (older than 5 minutes)
+      const enemyAge = now.getTime() - new Date(enemy.createdDatetime).getTime();
+      
+      if (enemyAge >= this.ENEMY_LIFETIME_MS) {
+        enemiesToDelete.push(enemy.id);
+        continue; // Skip this enemy, it will be deleted
+      }
+      
+      // Simulate movement (in a real game, this would be based on AI logic)
+      const shouldMove = false //Math.random() < 0.3; // 30% chance to move
+      // TODO: movement logic: must take into consideration valid tiles to move to
+      // also, it should move consistently for a period of time, not in random bursts
+      let newX = enemy.positionX;
+      let newY = enemy.positionY;
+      let newRotation = enemy.rotationY;
+      
+      if (shouldMove) {
+        // Random small movement (within 1 cube unit in world coordinates)
+        const moveDistance = this.CUBE_SIZE * 0.1; // 10% of cube size
+        newX += (Math.random() - 0.5) * moveDistance * 2;
+        newY += (Math.random() - 0.5) * moveDistance * 2;
+        newRotation = Math.random() * 360;
+        
+        // Update in database (non-blocking)
+        setImmediate(async () => {
+          try {
+            await db.collection('enemies').updateOne(
+              { id: enemy.id },
+              { 
+                $set: { 
+                  positionX: newX, 
+                  positionY: newY, 
+                  rotationY: newRotation,
+                  isMoving: shouldMove
+                }
+              }
+            );
+          } catch (error) {
+            console.error(`Error updating enemy ${enemy.id} position:`, error);
+          }
+        });
+      }
+      
+      // Add to floor group for broadcasting
+      if (!enemiesByFloor.has(enemy.floorName)) {
+        enemiesByFloor.set(enemy.floorName, []);
+      }
+      
+      enemiesByFloor.get(enemy.floorName)!.push({
+        id: enemy.id,
+        enemyTypeID: enemy.enemyTypeID,
+        enemyTypeName: enemy.enemyTypeName,
+        positionX: newX,
+        positionY: newY,
+        rotationY: newRotation,
+        isMoving: shouldMove
+      });
+    }
+    
+    // Delete expired enemies
+    for (const enemyId of enemiesToDelete) {
+      await this.deleteEnemy(enemyId);
+    }
+    
+    // Broadcast movements to each floor
+    enemiesByFloor.forEach((floorEnemies, floorName) => {
+      if (floorEnemies.length > 0) {
+        broadcastToFloor(floorName, {
+          type: 'enemy-moved',
+          data: {
+            floorName,
+            enemies: floorEnemies
+          }
+        });
+      }
+    });
   }
 
   /**
@@ -152,13 +244,8 @@ export class EnemyService {
           floorName: enemy.floorName
         }
       });
-    }
-    
-    // Clear the timer if it exists
-    const timer = this.enemyTimers.get(enemyId);
-    if (timer) {
-      clearTimeout(timer);
-      this.enemyTimers.delete(enemyId);
+      
+      console.log(`Enemy ${enemyId} deleted after ${this.ENEMY_LIFETIME_MS / 1000} seconds`);
     }
   }
 
@@ -234,7 +321,9 @@ export class EnemyService {
    * Cleanup method to clear all timers (useful for graceful shutdown)
    */
   cleanup(): void {
-    this.enemyTimers.forEach((timer) => clearTimeout(timer));
-    this.enemyTimers.clear();
+    if (this.movementBroadcastInterval) {
+      clearInterval(this.movementBroadcastInterval);
+      this.movementBroadcastInterval = null;
+    }
   }
 }

@@ -1,14 +1,9 @@
 import { Router } from 'express';
-import { DungeonService } from '../services/dungeonService';
-import { PlayerService } from '../services/playerService';
-import { EnemyService } from '../services/enemyService';
+import { dungeonService, playerService, enemyService } from '../services';
 import { changePlayerFloor, getTotalPlayerCount, getPlayerCountsByFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
-const dungeonService = new DungeonService();
-const playerService = new PlayerService();
-const enemyService = new EnemyService();
 
 // Apply authentication middleware to all dungeon routes
 router.use(authenticateToken);
