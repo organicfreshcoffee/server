@@ -25,11 +25,10 @@ export interface EnemyType {
 export class EnemyService {
   private readonly CUBE_SIZE = 5;
   private readonly ENEMY_LIFETIME_MS = 5 * 60 * 1000; // 5 minutes
-  private movementBroadcastInterval: NodeJS.Timeout | null = null;
-  private isUpdateLoopRunning = false;
+  private enemyThreads: Map<string, NodeJS.Timeout> = new Map(); // Track individual enemy threads
 
   constructor() {
-    // Don't start the update loop immediately - it will start when first enemy is spawned
+    // No shared update loop - each enemy manages its own thread
   }
 
   /**
@@ -104,10 +103,8 @@ export class EnemyService {
 
     await db.collection('enemies').insertOne(enemy);
     
-    // Start the update loop if it's not already running
-    if (!this.isUpdateLoopRunning) {
-      this.startEnemyUpdateLoop();
-    }
+    // Start an independent thread for this enemy
+    this.startEnemyThread(enemy);
     
     // Send WebSocket message to all clients on this floor about the new enemy
     broadcastToFloor(floorName, {
@@ -123,73 +120,61 @@ export class EnemyService {
   }
 
   /**
-   * Start the main enemy update loop that handles movement and cleanup
+   * Start an independent thread for a single enemy
    */
-  private startEnemyUpdateLoop(): void {
-    if (this.isUpdateLoopRunning) {
-      return; // Already running
-    }
+  private startEnemyThread(enemy: Enemy): void {
+    const startTime = Date.now();
     
-    this.isUpdateLoopRunning = true;
-    this.movementBroadcastInterval = setInterval(async () => {
+    const enemyUpdateInterval = setInterval(async () => {
       try {
-        await this.updateEnemies();
+        // Check if enemy should be deleted (older than 5 minutes)
+        const elapsedTime = Date.now() - startTime;
+        
+        if (elapsedTime >= this.ENEMY_LIFETIME_MS) {
+          // Time to despawn this enemy
+          await this.deleteEnemy(enemy.id);
+          clearInterval(enemyUpdateInterval);
+          this.enemyThreads.delete(enemy.id);
+          console.log(`Enemy thread ${enemy.id} terminated after ${this.ENEMY_LIFETIME_MS / 1000} seconds`);
+          return;
+        }
+        
+        // Update enemy position and movement
+        await this.updateSingleEnemy(enemy);
+        
       } catch (error) {
-        console.error('Error in enemy update loop:', error);
+        console.error(`Error in enemy thread ${enemy.id}:`, error);
+        // Clean up on error
+        clearInterval(enemyUpdateInterval);
+        this.enemyThreads.delete(enemy.id);
       }
     }, 1000); // Update every second
     
-    console.log('Enemy update loop started');
+    // Track this enemy's thread
+    this.enemyThreads.set(enemy.id, enemyUpdateInterval);
+    console.log(`Started independent thread for enemy ${enemy.id}`);
   }
 
   /**
-   * Stop the enemy update loop
+   * Update a single enemy's position and broadcast to clients
    */
-  private stopEnemyUpdateLoop(): void {
-    if (this.movementBroadcastInterval) {
-      clearInterval(this.movementBroadcastInterval);
-      this.movementBroadcastInterval = null;
-      this.isUpdateLoopRunning = false;
-      console.log('Enemy update loop stopped - no enemies remaining');
-    }
-  }
-
-  /**
-   * Update all enemies: handle movement, check for expiration, and broadcast
-   */
-  private async updateEnemies(): Promise<void> {
+  private async updateSingleEnemy(enemy: Enemy): Promise<void> {
     const db = getDatabase();
-    const now = new Date();
     
-    // Get all enemies
-    const enemies = await db.collection('enemies').find({}).toArray();
-    
-    // If no enemies exist, stop the update loop
-    if (enemies.length === 0) {
-      this.stopEnemyUpdateLoop();
-      return;
-    }
-    
-    // Group enemies by floor for broadcasting
-    const enemiesByFloor = new Map<string, any[]>();
-    const enemiesToDelete: string[] = [];
-    
-    for (const enemy of enemies) {
-      // Check if enemy should be deleted (older than 5 minutes)
-      const enemyAge = now.getTime() - new Date(enemy.createdDatetime).getTime();
-      
-      if (enemyAge >= this.ENEMY_LIFETIME_MS) {
-        enemiesToDelete.push(enemy.id);
-        continue; // Skip this enemy, it will be deleted
+    try {
+      // Get current enemy data from database
+      const currentEnemy = await db.collection('enemies').findOne({ id: enemy.id });
+      if (!currentEnemy) {
+        return; // Enemy was deleted
       }
       
       // Simulate movement (in a real game, this would be based on AI logic)
-      const shouldMove = false //Math.random() < 0.3; // 30% chance to move
+      const shouldMove = false; // Math.random() < 0.3; // 30% chance to move
       // TODO: movement logic: must take into consideration valid tiles to move to
       // also, it should move consistently for a period of time, not in random bursts
-      let newX = enemy.positionX;
-      let newY = enemy.positionY;
-      let newRotation = enemy.rotationY;
+      let newX = currentEnemy.positionX;
+      let newY = currentEnemy.positionY;
+      let newRotation = currentEnemy.rotationY;
       
       if (shouldMove) {
         // Random small movement (within 1 cube unit in world coordinates)
@@ -198,70 +183,50 @@ export class EnemyService {
         newY += (Math.random() - 0.5) * moveDistance * 2;
         newRotation = Math.random() * 360;
         
-        // Update in database (non-blocking)
-        setImmediate(async () => {
-          try {
-            await db.collection('enemies').updateOne(
-              { id: enemy.id },
-              { 
-                $set: { 
-                  positionX: newX, 
-                  positionY: newY, 
-                  rotationY: newRotation,
-                  isMoving: shouldMove
-                }
-              }
-            );
-          } catch (error) {
-            console.error(`Error updating enemy ${enemy.id} position:`, error);
+        // Update in database
+        await db.collection('enemies').updateOne(
+          { id: enemy.id },
+          { 
+            $set: { 
+              positionX: newX, 
+              positionY: newY, 
+              rotationY: newRotation,
+              isMoving: shouldMove
+            }
           }
-        });
+        );
+        
+        // Update the local enemy object for next iteration
+        enemy.positionX = newX;
+        enemy.positionY = newY;
+        enemy.rotationY = newRotation;
+        enemy.isMoving = shouldMove;
       }
       
-      // Add to floor group for broadcasting
-      if (!enemiesByFloor.has(enemy.floorName)) {
-        enemiesByFloor.set(enemy.floorName, []);
-      }
-      
-      enemiesByFloor.get(enemy.floorName)!.push({
-        id: enemy.id,
-        enemyTypeID: enemy.enemyTypeID,
-        enemyTypeName: enemy.enemyTypeName,
-        positionX: newX,
-        positionY: newY,
-        rotationY: newRotation,
-        isMoving: shouldMove
+      // Broadcast this enemy's movement to all clients on the floor
+      broadcastToFloor(currentEnemy.floorName, {
+        type: 'enemy-moved',
+        data: {
+          floorName: currentEnemy.floorName,
+          enemies: [{
+            id: enemy.id,
+            enemyTypeID: currentEnemy.enemyTypeID,
+            enemyTypeName: currentEnemy.enemyTypeName,
+            positionX: newX,
+            positionY: newY,
+            rotationY: newRotation,
+            isMoving: shouldMove
+          }]
+        }
       });
+      
+    } catch (error) {
+      console.error(`Error updating enemy ${enemy.id}:`, error);
     }
-    
-    // Delete expired enemies
-    for (const enemyId of enemiesToDelete) {
-      await this.deleteEnemy(enemyId);
-    }
-    
-    // Check if we should stop the loop after deletions
-    const remainingEnemies = await db.collection('enemies').countDocuments({});
-    if (remainingEnemies === 0) {
-      this.stopEnemyUpdateLoop();
-      return;
-    }
-    
-    // Broadcast movements to each floor
-    enemiesByFloor.forEach((floorEnemies, floorName) => {
-      if (floorEnemies.length > 0) {
-        broadcastToFloor(floorName, {
-          type: 'enemy-moved',
-          data: {
-            floorName,
-            enemies: floorEnemies
-          }
-        });
-      }
-    });
   }
 
   /**
-   * Delete an enemy from the database
+   * Delete an enemy from the database and clean up its thread
    */
   async deleteEnemy(enemyId: string): Promise<void> {
     const db = getDatabase();
@@ -272,6 +237,13 @@ export class EnemyService {
     if (enemy) {
       // Delete the enemy
       await db.collection('enemies').deleteOne({ id: enemyId });
+      
+      // Clean up the enemy's thread
+      const enemyThread = this.enemyThreads.get(enemyId);
+      if (enemyThread) {
+        clearInterval(enemyThread);
+        this.enemyThreads.delete(enemyId);
+      }
       
       // Send WebSocket message to all clients on this floor about the enemy being deleted
       broadcastToFloor(enemy.floorName, {
@@ -318,6 +290,7 @@ export class EnemyService {
         attempts++;
       } while (attempts < 50); // Prevent infinite loop
       
+      // TODO: fix this attempt retry logic, it shouldn't need more than 1 attempt
       if (attempts >= 50) {
         console.warn(`Could not find unique position for enemy ${i + 1} on floor ${floorName}`);
         // Use a random tile even if it's occupied
@@ -355,13 +328,14 @@ export class EnemyService {
   }
 
   /**
-   * Cleanup method to clear all timers (useful for graceful shutdown)
+   * Cleanup method to clear all enemy threads (useful for graceful shutdown)
    */
   cleanup(): void {
-    if (this.movementBroadcastInterval) {
-      clearInterval(this.movementBroadcastInterval);
-      this.movementBroadcastInterval = null;
-      this.isUpdateLoopRunning = false;
-    }
+    // Clear all individual enemy threads
+    this.enemyThreads.forEach((thread, enemyId) => {
+      clearInterval(thread);
+      console.log(`Cleaned up thread for enemy ${enemyId}`);
+    });
+    this.enemyThreads.clear();
   }
 }

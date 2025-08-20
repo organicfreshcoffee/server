@@ -121,9 +121,9 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
               y: tile.y
             }));
             
-            // Spawn 5 enemies on random floor tiles
+            // Spawn 5 enemies on random floor tiles - each enemy gets its own independent thread
             await enemyService.spawnEnemiesOnFloor(newFloorName, floorTilePositions);
-            console.log(`Successfully spawned enemies on floor ${newFloorName}`);
+            console.log(`Successfully spawned 5 independent enemy threads on floor ${newFloorName}`);
           } else {
             console.warn(`No floor tiles found for floor ${newFloorName}, cannot spawn enemies`);
           }
