@@ -81,6 +81,29 @@ function addClientToFloor(clientId: string, dungeonDagNodeName: string): void {
   const client = clients.get(clientId);
   if (client) {
     client.currentDungeonDagNodeName = dungeonDagNodeName;
+    
+    // Send existing enemies on this floor to the newly joined client
+    setImmediate(async () => {
+      try {
+        // Import EnemyService here to avoid circular dependency issues
+        const { EnemyService } = await import('./enemyService');
+        const enemyService = new EnemyService();
+        const enemies = await enemyService.getEnemiesOnFloor(dungeonDagNodeName);
+        
+        if (enemies.length > 0 && client.ws.readyState === WebSocket.OPEN) {
+          client.ws.send(JSON.stringify({
+            type: 'floor-enemies',
+            data: {
+              floorName: dungeonDagNodeName,
+              enemies: enemies
+            },
+            timestamp: new Date()
+          }));
+        }
+      } catch (error) {
+        console.error(`Error sending existing enemies to client ${clientId} on floor ${dungeonDagNodeName}:`, error);
+      }
+    });
   }
 }
 
@@ -119,7 +142,7 @@ function moveClientToFloor(clientId: string, newDungeonDagNodeName: string): voi
 }
 
 // Floor-based broadcasting functions
-function broadcastToFloor(dungeonDagNodeName: string, message: GameMessage): void {
+export function broadcastToFloor(dungeonDagNodeName: string, message: GameMessage): void {
   const messageWithTimestamp = {
     ...message,
     timestamp: new Date(),
