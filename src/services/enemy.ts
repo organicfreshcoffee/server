@@ -142,6 +142,48 @@ export class Enemy {
   }
 
   /**
+   * Update enemy health and handle death
+   */
+  async updateHealth(newHealth: number): Promise<boolean> {
+    try {
+      const db = getDatabase();
+      
+      // Clamp health to minimum 0
+      const clampedHealth = Math.max(0, newHealth);
+      
+      // Update health in database
+      await db.collection('enemies').updateOne(
+        { id: this.enemyData.id },
+        { 
+          $set: { 
+            health: clampedHealth,
+            lastUpdate: new Date()
+          } 
+        }
+      );
+      
+      // Update local data
+      this.enemyData.health = clampedHealth;
+      
+      console.log(`Enemy ${this.enemyData.id} health updated: ${this.enemyData.health} -> ${clampedHealth}`);
+      
+      // Check if enemy died
+      if (clampedHealth <= 0) {
+        console.log(`Enemy ${this.enemyData.id} died from damage!`);
+
+        // call delete to de-spawn
+        await this.delete();
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error(`Error updating health for enemy ${this.enemyData.id}:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Despawn and destroy the enemy thread
    */
   async delete(): Promise<void> {

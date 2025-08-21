@@ -202,6 +202,26 @@ export class EnemyService {
   }
 
   /**
+   * Update enemy health and handle death
+   */
+  async updateEnemyHealth(enemyId: string, newHealth: number): Promise<boolean> {
+    const enemyInstance = this.activeEnemies.get(enemyId);
+    if (!enemyInstance) {
+      console.warn(`Enemy ${enemyId} not found in active enemies for health update`);
+      return false;
+    }
+    
+    await enemyInstance.updateHealth(newHealth);
+  }
+
+  /**
+   * Get enemy instance by ID
+   */
+  getActiveEnemy(enemyId: string): Enemy | undefined {
+    return this.activeEnemies.get(enemyId);
+  }
+
+  /**
    * Get all enemies on a specific floor
    */
   async getEnemiesOnFloor(floorName: string): Promise<EnemyData[]> {
