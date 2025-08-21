@@ -110,7 +110,8 @@ export class EnemyService {
     floorName: string,
     tileX: number,
     tileY: number,
-    enemyType: EnemyType
+    enemyType: EnemyType,
+    floorTiles: Array<{ x: number; y: number }>
   ): Promise<EnemyData> {
     const db = getDatabase();
     
@@ -132,7 +133,7 @@ export class EnemyService {
     await db.collection('enemies').insertOne(enemyData);
     
     // Create and initialize the enemy instance
-    const enemy = new Enemy(enemyData, (enemyId) => {
+    const enemy = new Enemy(enemyData, floorTiles, (enemyId) => {
       // Callback to remove from active enemies when despawned
       // TODO: callback to delete just calls delete again
       this.removeActiveEnemy(enemyId);
@@ -162,39 +163,17 @@ export class EnemyService {
     }
 
     const enemies: EnemyData[] = [];
-    const usedPositions = new Set<string>();
 
     for (let i = 0; i < 5; i++) {
       // Get a random enemy type
       const enemyType = await this.getRandomEnemyType();
       
-      // Find a random unused floor tile
-      let attempts = 0;
-      let selectedTile;
-      
-      do {
-        const randomIndex = Math.floor(Math.random() * floorTiles.length);
-        selectedTile = floorTiles[randomIndex];
-        const positionKey = `${selectedTile.x},${selectedTile.y}`;
-        
-        if (!usedPositions.has(positionKey)) {
-          usedPositions.add(positionKey);
-          break;
-        }
-        
-        attempts++;
-      } while (attempts < 50); // Prevent infinite loop
-      
-      // TODO: fix this attempt retry logic, it shouldn't need more than 1 attempt
-      if (attempts >= 50) {
-        console.warn(`Could not find unique position for enemy ${i + 1} on floor ${floorName}`);
-        // Use a random tile even if it's occupied
-        const randomIndex = Math.floor(Math.random() * floorTiles.length);
-        selectedTile = floorTiles[randomIndex];
-      }
+      // Simply select a random floor tile
+      const randomIndex = Math.floor(Math.random() * floorTiles.length);
+      const selectedTile = floorTiles[randomIndex];
 
       // Create the enemy at the selected tile position
-      const enemy = await this.createEnemy(floorName, selectedTile.x, selectedTile.y, enemyType);
+      const enemy = await this.createEnemy(floorName, selectedTile.x, selectedTile.y, enemyType, floorTiles);
       enemies.push(enemy);
     }
 

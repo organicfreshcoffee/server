@@ -18,14 +18,24 @@ export interface EnemyData {
 export class Enemy {
   private readonly CUBE_SIZE = 5;
   private readonly ENEMY_LIFETIME_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly MOVEMENT_SPEED = 0.5; // Units per tick
   private ticker: NodeJS.Timeout | null = null;
   private startTime: number;
   private isDespawned = false;
   private onDespawnCallback?: (enemyId: string) => void;
+  private floorTiles: Array<{ x: number; y: number }>;
+  private destinationX: number | null = null;
+  private destinationY: number | null = null;
+  private isMovingToDestination = false;
   
-  constructor(private enemyData: EnemyData, onDespawn?: (enemyId: string) => void) {
+  constructor(
+    private enemyData: EnemyData, 
+    floorTiles: Array<{ x: number; y: number }>,
+    onDespawn?: (enemyId: string) => void
+  ) {
     this.startTime = Date.now();
     this.onDespawnCallback = onDespawn;
+    this.floorTiles = floorTiles;
   }
 
   /**
@@ -85,39 +95,31 @@ export class Enemy {
         return;
       }
 
-      // Simulate movement (in a real game, this would be based on AI logic)
-      const shouldMove = false; // Math.random() < 0.3; // 30% chance to move
-      // TODO: movement logic: must take into consideration valid tiles to move to
-      // also, it should move consistently for a period of time, not in random bursts
-      let newX = this.enemyData.positionX;
-      let newY = this.enemyData.positionY;
-      let newRotation = this.enemyData.rotationY;
-      
-      if (shouldMove) {
-        // Random small movement (within 1 cube unit in world coordinates)
-        const moveDistance = this.CUBE_SIZE * 0.1; // 10% of cube size
-        newX += (Math.random() - 0.5) * moveDistance * 2;
-        newY += (Math.random() - 0.5) * moveDistance * 2;
-        newRotation = Math.random() * 360;
+      // Convert current position to tile coordinates
+      const currentTileX = Math.round(this.enemyData.positionX / this.CUBE_SIZE);
+      const currentTileY = Math.round(this.enemyData.positionY / this.CUBE_SIZE);
+
+      // If we don't have a destination or we've reached our destination, pick a new one
+      if (!this.isMovingToDestination || this.hasReachedDestination()) {
+        this.pickNewDestination(currentTileX, currentTileY);
+      }
+
+      // Move towards destination if we have one
+      if (this.destinationX !== null && this.destinationY !== null) {
+        this.moveTowardsDestination();
         
         // Update in database
         await db.collection('enemies').updateOne(
           { id: this.enemyData.id },
           { 
             $set: { 
-              positionX: newX, 
-              positionY: newY, 
-              rotationY: newRotation,
-              isMoving: shouldMove
+              positionX: this.enemyData.positionX, 
+              positionY: this.enemyData.positionY, 
+              rotationY: this.enemyData.rotationY,
+              isMoving: this.isMovingToDestination
             }
           }
         );
-        
-        // Update local enemy data
-        this.enemyData.positionX = newX;
-        this.enemyData.positionY = newY;
-        this.enemyData.rotationY = newRotation;
-        this.enemyData.isMoving = shouldMove;
       }
       
       // Broadcast this enemy's movement to all clients on the floor
@@ -129,20 +131,109 @@ export class Enemy {
             id: this.enemyData.id,
             enemyTypeID: this.enemyData.enemyTypeID,
             enemyTypeName: this.enemyData.enemyTypeName,
-            positionX: newX,
-            positionY: newY,
-            rotationY: newRotation,
-            isMoving: shouldMove
+            positionX: this.enemyData.positionX,
+            positionY: this.enemyData.positionY,
+            rotationY: this.enemyData.rotationY,
+            isMoving: this.isMovingToDestination
           }]
         }
       }, clients);
-      
+
     } catch (error) {
       console.error(`Error in enemy movement ${this.enemyData.id}:`, error);
     }
   }
 
   /**
+   * Pick a new destination from adjacent tiles
+   */
+  private pickNewDestination(currentTileX: number, currentTileY: number): void {
+    // Get adjacent tiles
+    const adjacentTiles = this.getAdjacentTiles(currentTileX, currentTileY);
+    
+    if (adjacentTiles.length === 0) {
+      console.warn(`No adjacent tiles found for enemy ${this.enemyData.id} at tile (${currentTileX}, ${currentTileY})`);
+      this.isMovingToDestination = false;
+      return;
+    }
+
+    // Pick a random adjacent tile
+    const randomIndex = Math.floor(Math.random() * adjacentTiles.length);
+    const selectedTile = adjacentTiles[randomIndex];
+    
+    // Convert tile coordinates to world coordinates
+    this.destinationX = selectedTile.x * this.CUBE_SIZE;
+    this.destinationY = selectedTile.y * this.CUBE_SIZE;
+    this.isMovingToDestination = true;
+    
+    console.log(`Enemy ${this.enemyData.id} picked new destination: tile (${selectedTile.x}, ${selectedTile.y}) = world (${this.destinationX}, ${this.destinationY})`);
+  }
+
+  /**
+   * Get all valid floor tiles adjacent to the current position
+   */
+  private getAdjacentTiles(currentTileX: number, currentTileY: number): Array<{ x: number; y: number }> {
+    const adjacentPositions = [
+      { x: currentTileX - 1, y: currentTileY },     // Left
+      { x: currentTileX + 1, y: currentTileY },     // Right
+      { x: currentTileX, y: currentTileY - 1 },     // Up
+      { x: currentTileX, y: currentTileY + 1 },     // Down
+      { x: currentTileX - 1, y: currentTileY - 1 }, // Top-left
+      { x: currentTileX + 1, y: currentTileY - 1 }, // Top-right
+      { x: currentTileX - 1, y: currentTileY + 1 }, // Bottom-left
+      { x: currentTileX + 1, y: currentTileY + 1 }  // Bottom-right
+    ];
+
+    // Filter to only include valid floor tiles
+    return adjacentPositions.filter(pos => 
+      this.floorTiles.some(tile => tile.x === pos.x && tile.y === pos.y)
+    );
+  }
+
+  /**
+   * Move towards the current destination
+   */
+  private moveTowardsDestination(): void {
+    if (this.destinationX === null || this.destinationY === null) {
+      return;
+    }
+
+    const deltaX = this.destinationX - this.enemyData.positionX;
+    const deltaY = this.destinationY - this.enemyData.positionY;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+    if (distance <= this.MOVEMENT_SPEED) {
+      // We've reached the destination
+      this.enemyData.positionX = this.destinationX;
+      this.enemyData.positionY = this.destinationY;
+      this.isMovingToDestination = false;
+    } else {
+      // Move towards destination
+      const normalizedX = deltaX / distance;
+      const normalizedY = deltaY / distance;
+      
+      this.enemyData.positionX += normalizedX * this.MOVEMENT_SPEED;
+      this.enemyData.positionY += normalizedY * this.MOVEMENT_SPEED;
+      
+      // Update rotation to face movement direction
+      this.enemyData.rotationY = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+    }
+  }
+
+  /**
+   * Check if we've reached our destination
+   */
+  private hasReachedDestination(): boolean {
+    if (this.destinationX === null || this.destinationY === null) {
+      return true;
+    }
+
+    const deltaX = this.destinationX - this.enemyData.positionX;
+    const deltaY = this.destinationY - this.enemyData.positionY;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+    return distance <= this.MOVEMENT_SPEED;
+  }  /**
    * Update enemy health and handle death
    */
   async updateHealth(newHealth: number): Promise<boolean> {
