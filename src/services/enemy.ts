@@ -18,7 +18,7 @@ export interface EnemyData {
 export class Enemy {
   private readonly CUBE_SIZE = 5;
   private readonly ENEMY_LIFETIME_MS = 5 * 60 * 1000; // 5 minutes
-  private readonly MOVEMENT_SPEED = 0.5; // Units per tick
+  private readonly MOVEMENT_SPEED = 0.1; // Units per tick
   private ticker: NodeJS.Timeout | null = null;
   private startTime: number;
   private isDespawned = false;
@@ -49,7 +49,7 @@ export class Enemy {
 
     this.ticker = setInterval(() => {
       this.tick();
-    }, 1000); // Tick every second
+    }, 100); // Tick every second
 
     console.log(`Enemy thread initialized for ${this.enemyData.id} (${this.enemyData.enemyTypeName})`);
   }
