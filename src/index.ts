@@ -10,7 +10,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { setupWebSocketServer } from './services/websocket';
 import dungeonRoutes from './routes/dungeon';
 import userRoutes from './routes/user';
-import { DungeonService } from './services/dungeonService';
+import { dungeonService, enemyService } from './services';
 
 // Load environment variables
 dotenv.config();
@@ -71,19 +71,19 @@ async function startServer(): Promise<void> {
     await connectToDatabase();
     console.log('MongoDB connected successfully');
 
-    // Check if dungeon is initialized, if not initialize it
-    console.log('Checking dungeon initialization...');
-    const dungeonService = new DungeonService();
-    const spawn = await dungeonService.getSpawn();
-    if (!spawn) {
-      console.log('Dungeon not found, initializing...');
+    // Initialize dungeon system
+    console.log('Initializing dungeon system...');
+    
+    // Check if dungeon is already initialized (root node exists)
+    const db = await connectToDatabase();
+    const rootNode = await db.collection('dungeonDagNodes').findOne({ name: 'A' });
+    
+    if (!rootNode) {
       await dungeonService.initializeDungeon();
       console.log('Dungeon initialized successfully');
     } else {
       console.log('Dungeon already initialized');
-    }
-
-    // Setup WebSocket server
+    }    // Setup WebSocket server
     console.log('Setting up WebSocket server...');
     setupWebSocketServer(wss);
     console.log('WebSocket server setup complete');
@@ -107,6 +107,7 @@ async function startServer(): Promise<void> {
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
+  enemyService.cleanup();
   server.close(() => {
     console.log('Server closed');
     process.exit(0);
@@ -115,6 +116,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   console.log('SIGINT received, shutting down gracefully');
+  enemyService.cleanup();
   server.close(() => {
     console.log('Server closed');
     process.exit(0);

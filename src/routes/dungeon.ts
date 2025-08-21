@@ -1,12 +1,9 @@
 import { Router } from 'express';
-import { DungeonService } from '../services/dungeonService';
-import { PlayerService } from '../services/playerService';
+import { dungeonService, playerService, enemyService } from '../services';
 import { changePlayerFloor, getTotalPlayerCount, getPlayerCountsByFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 
 const router = Router();
-const dungeonService = new DungeonService();
-const playerService = new PlayerService();
 
 // Apply authentication middleware to all dungeon routes
 router.use(authenticateToken);
@@ -105,6 +102,38 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
     
     // Trigger procedural generation if needed
     await dungeonService.checkAndGenerateFloors(newFloorName, playerLevels);
+
+    // Check for enemies on the new floor and spawn them if needed (non-blocking)
+    setImmediate(async () => {
+      try {
+        const hasEnemies = await enemyService.hasEnemiesOnFloor(newFloorName);
+        
+        if (!hasEnemies) {
+          console.log(`No enemies found on floor ${newFloorName}, spawning new enemies...`);
+          
+          // Get floor tile data for enemy positioning
+          const tileData = await dungeonService.getGeneratedFloorTileData(newFloorName);
+          
+          if (tileData && tileData.tiles.floorTiles.length > 0) {
+            // Extract just the position data for enemy spawning
+            const floorTilePositions = tileData.tiles.floorTiles.map(tile => ({
+              x: tile.x,
+              y: tile.y
+            }));
+            
+            // Spawn 5 enemies on random floor tiles - each enemy gets its own independent thread
+            await enemyService.spawnEnemiesOnFloor(newFloorName, floorTilePositions);
+            console.log(`Successfully spawned 5 independent enemy threads on floor ${newFloorName}`);
+          } else {
+            console.warn(`No floor tiles found for floor ${newFloorName}, cannot spawn enemies`);
+          }
+        } else {
+          console.log(`Enemies already exist on floor ${newFloorName}, skipping spawn`);
+        }
+      } catch (error) {
+        console.error(`Error spawning enemies on floor ${newFloorName}:`, error);
+      }
+    });
 
     // Change player's floor (handles WebSocket room management and notifications)
     const result = await changePlayerFloor(userId, newFloorName);
@@ -302,6 +331,27 @@ router.get('/player-count', async (req: AuthenticatedRequest, res): Promise<void
     });
   } catch (error) {
     console.error('Error in get-player-count:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Get enemy count by floor (only returns floors with enemies)
+ * GET /api/dungeon/enemy-count
+ */
+router.get('/enemy-count', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const enemyData = await enemyService.getEnemyCountsByFloor();
+
+    res.json({
+      success: true,
+      data: enemyData
+    });
+  } catch (error) {
+    console.error('Error in get-enemy-count:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'
