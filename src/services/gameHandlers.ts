@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import { WebSocketClient, GameState, Player, GameMessage } from '../types/game';
+import { WebSocketClient, GameState, GameMessage } from '../types/game';
 import { SpellData, MoveData, ActionData, RespawnData, MoveBroadcastData } from './gameTypes';
 import { PlayerService } from './playerService';
 import { EnemyService } from './enemyService';

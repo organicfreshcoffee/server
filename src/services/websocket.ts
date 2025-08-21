@@ -5,7 +5,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { AuthService } from './authService';
 import { PlayerService } from './playerService';
 import { DungeonService } from './dungeonService';
-import { EnemyService } from './enemyService';
 import { GameMessage, WebSocketClient, GameState, Player } from '../types/game';
 import { MoveData, ActionData, RespawnData } from './gameTypes';
 import { createSafePlayerData } from './gameUtils';
@@ -20,9 +19,6 @@ import {
   floorClients
 } from './floorManager';
 import {
-  findClientByPlayerId,
-  sendMessage,
-  sendErrorMessage,
   handlePlayerMove,
   handlePlayerAction,
   handlePlayerRespawn,
