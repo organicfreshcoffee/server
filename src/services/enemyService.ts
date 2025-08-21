@@ -206,12 +206,17 @@ export class EnemyService {
    * Update enemy health and handle death
    */
   async updateEnemyHealth(enemyId: string, newHealth: number): Promise<boolean> {
+    console.log(`[ENEMY SERVICE DEBUG] updateEnemyHealth called for enemy ${enemyId} with newHealth: ${newHealth}`);
+    
     const enemyInstance = this.activeEnemies.get(enemyId);
     if (!enemyInstance) {
       console.warn(`Enemy ${enemyId} not found in active enemies for health update`);
+      console.log(`[ENEMY SERVICE DEBUG] Active enemies count: ${this.activeEnemies.size}`);
+      console.log(`[ENEMY SERVICE DEBUG] Active enemy IDs:`, Array.from(this.activeEnemies.keys()));
       return false;
     }
     
+    console.log(`[ENEMY SERVICE DEBUG] Found enemy instance for ${enemyId}, calling updateHealth...`);
     await enemyInstance.updateHealth(newHealth);
     return true;
   }

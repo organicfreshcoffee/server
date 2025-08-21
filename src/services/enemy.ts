@@ -146,11 +146,18 @@ export class Enemy {
    * Update enemy health and handle death
    */
   async updateHealth(newHealth: number): Promise<boolean> {
+    console.log(`[ENEMY DEBUG] updateHealth called for enemy ${this.enemyData.id} with newHealth: ${newHealth}`);
+    
     try {
       const db = getDatabase();
       
+      // Capture old health before updating
+      const oldHealth = this.enemyData.health;
+      
       // Clamp health to minimum 0
       const clampedHealth = Math.max(0, newHealth);
+      
+      console.log(`[ENEMY DEBUG] Updating health from ${oldHealth} to ${clampedHealth}`);
       
       // Update health in database
       await db.collection('enemies').updateOne(
@@ -166,7 +173,7 @@ export class Enemy {
       // Update local data
       this.enemyData.health = clampedHealth;
       
-      console.log(`Enemy ${this.enemyData.id} health updated: ${this.enemyData.health} -> ${clampedHealth}`);
+      console.log(`Enemy ${this.enemyData.id} health updated: ${oldHealth} -> ${clampedHealth}`);
       
       // Check if enemy died
       if (clampedHealth <= 0) {

@@ -28,11 +28,11 @@ import {
   handlePlayerRespawn,
   cleanupRateLimitData
 } from './gameHandlers';
+import { enemyService } from './index';
 
 const authService = new AuthService();
 const playerService = new PlayerService();
 const dungeonService = new DungeonService();
-const enemyService = new EnemyService();
 const clients = new Map<string, WebSocketClient>();
 
 // Export clients for use in other modules

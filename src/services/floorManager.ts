@@ -25,9 +25,8 @@ export function addClientToFloor(
     // Send existing enemies on this floor to the newly joined client
     setImmediate(async () => {
       try {
-        // Import EnemyService here to avoid circular dependency issues
-        const { EnemyService } = await import('./enemyService');
-        const enemyService = new EnemyService();
+        // Import shared enemyService to avoid circular dependency issues
+        const { enemyService } = await import('./index');
         const enemies = await enemyService.getEnemiesOnFloor(dungeonDagNodeName);
         
         if (enemies.length > 0 && client.ws.readyState === WebSocket.OPEN) {
