@@ -216,7 +216,7 @@ export class Enemy {
       this.enemyData.positionY += normalizedY * this.MOVEMENT_SPEED;
       
       // Update rotation to face movement direction
-      this.enemyData.rotationY = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+      this.enemyData.rotationY = Math.atan2(deltaY, deltaX);
     }
   }
 
