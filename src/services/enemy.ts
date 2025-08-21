@@ -1,5 +1,6 @@
 import { getDatabase } from '../config/database';
-import { broadcastToFloor } from './websocket';
+import { broadcastToFloor } from './floorManager';
+import { clients } from './websocket';
 
 export interface EnemyData {
   id: string;
@@ -134,7 +135,7 @@ export class Enemy {
             isMoving: shouldMove
           }]
         }
-      });
+      }, clients);
       
     } catch (error) {
       console.error(`Error in enemy movement ${this.enemyData.id}:`, error);
@@ -204,7 +205,7 @@ export class Enemy {
           enemyId: this.enemyData.id,
           floorName: this.enemyData.floorName
         }
-      });
+      }, clients);
       
       console.log(`Enemy ${this.enemyData.id} despawned after ${this.ENEMY_LIFETIME_MS / 1000} seconds`);
       

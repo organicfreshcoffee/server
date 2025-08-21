@@ -35,6 +35,9 @@ const dungeonService = new DungeonService();
 const enemyService = new EnemyService();
 const clients = new Map<string, WebSocketClient>();
 
+// Export clients for use in other modules
+export { clients };
+
 // Export gameState for use in other modules
 export const gameState: GameState = {
   players: new Map<string, Player>(),

@@ -1,6 +1,7 @@
 import { getDatabase } from '../config/database';
 import { v4 as uuidv4 } from 'uuid';
-import { broadcastToFloor } from './websocket';
+import { broadcastToFloor } from './floorManager';
+import { clients } from './websocket';
 import { Enemy, EnemyData } from './enemy';
 
 // Re-export the interface for backward compatibility
@@ -145,7 +146,7 @@ export class EnemyService {
       data: {
         enemy: enemyData
       }
-    });
+    }, clients);
     
     console.log(`Created enemy ${enemyData.enemyTypeName} with ID ${enemyData.id} on floor ${floorName} at world position (${worldX}, ${worldY})`);
     
@@ -212,6 +213,7 @@ export class EnemyService {
     }
     
     await enemyInstance.updateHealth(newHealth);
+    return true;
   }
 
   /**
