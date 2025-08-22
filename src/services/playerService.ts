@@ -183,6 +183,32 @@ export class PlayerService {
     );
   }
 
+  async getAllPlayers(): Promise<Player[]> {
+    const db = getDatabase();
+    
+    const players = await db.collection(this.collection)
+      .find({})
+      .toArray();
+
+    return players.map(player => ({
+      id: player._id.toString(),
+      userId: player.userId,
+      username: player.username,
+      email: player.email,
+      position: player.position,
+      rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
+      character: player.character, // Character appearance/customization data
+      health: player.health,
+      maxHealth: player.maxHealth,
+      level: player.level,
+      experience: player.experience,
+      lastUpdate: player.lastUpdate,
+      isOnline: player.isOnline,
+      isAlive: player.isAlive !== undefined ? player.isAlive : true, // Default to alive if not set
+      currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
+    }));
+  }
+
   async getAllOnlinePlayers(): Promise<Player[]> {
     const db = getDatabase();
     

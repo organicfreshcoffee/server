@@ -103,6 +103,10 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
     // Trigger procedural generation if needed
     await dungeonService.checkAndGenerateFloors(newFloorName, playerLevels);
 
+    // Mark the dungeon node as visited by this user
+    await dungeonService.markDungeonNodeVisited(newFloorName, userId);
+    console.log(`Marked dungeon node ${newFloorName} as visited by user ${userId}`);
+
     // Check for enemies on the new floor and spawn them if needed (non-blocking)
     setImmediate(async () => {
       try {
@@ -352,6 +356,66 @@ router.get('/enemy-count', async (req: AuthenticatedRequest, res): Promise<void>
     });
   } catch (error) {
     console.error('Error in get-enemy-count:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Get all dungeon nodes visited by the requesting player
+ * GET /api/dungeon/visited-nodes
+ */
+router.get('/visited-nodes', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    // Get all dungeon nodes visited by this user
+    const visitedNodeNames = await dungeonService.getDungeonNodesVisitedByUser(userId);
+    
+    if (visitedNodeNames.length === 0) {
+      res.json({
+        success: true,
+        data: []
+      });
+      return;
+    }
+
+    // Get full dungeon node data for visited nodes
+    const { getDatabase } = await import('../config/database');
+    const db = getDatabase();
+    
+    const visitedNodes = await db.collection('dungeonDagNodes')
+      .find({ name: { $in: visitedNodeNames } })
+      .limit(0) // 0 means no limit - get all results
+      .toArray();
+
+    // Transform the response to include visitedBy field and exclude visitedByUserIds
+    const responseData = visitedNodes.map(node => ({
+      _id: node._id,
+      name: node.name,
+      children: node.children,
+      isDownwardsFromParent: node.isDownwardsFromParent,
+      isBossLevel: node.isBossLevel,
+      parentFloorDagNodeName: node.parentFloorDagNodeName,
+      visitedBy: true // This user has visited this node since we filtered by visited nodes
+    }));
+
+    res.json({
+      success: true,
+      data: responseData
+    });
+  } catch (error) {
+    console.error('Error in get-visited-nodes:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'

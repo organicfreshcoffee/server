@@ -56,6 +56,7 @@ export interface DungeonDagNode {
   isDownwardsFromParent: boolean; // true if stair from parent to self is down stair
   isBossLevel: boolean; // if true and zero children, don't regenerate children
   parentFloorDagNodeName?: string; // name of the room in parent floor that has stairs leading to this dungeon node
+  visitedByUserIds: string[]; // Array of user IDs that have visited this dungeon node
 }
 
 export interface FloorDagNode {

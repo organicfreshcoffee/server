@@ -1,8 +1,8 @@
 import { MongoClient } from 'mongodb';
 import { DungeonService } from '../src/services/dungeonService';
-import dotenv from 'dotenv';
+import { PlayerService } from '../src/services/playerService';
 
-dotenv.config();
+require('dotenv').config();
 
 async function runMigration(): Promise<void> {
   // Use MongoDB URI from environment variable or fallback to default
@@ -52,11 +52,46 @@ async function runMigration(): Promise<void> {
     const dungeonService = new DungeonService();
     await dungeonService.initializeDungeon();
     
+    // Get spawn location for player respawning
+    const spawnFloor = await dungeonService.getSpawn();
+    if (!spawnFloor) {
+      console.error('❌ Could not determine spawn location. Skipping player respawn.');
+    } else {
+      console.log(`✅ Spawn location determined: ${spawnFloor}`);
+      
+      // Initialize PlayerService and respawn all players
+      const playerService = new PlayerService();
+      const allPlayers = await playerService.getAllPlayers();
+      
+      console.log(`Found ${allPlayers.length} players to respawn...`);
+      
+      for (const player of allPlayers) {
+        try {
+          console.log(`Respawning player: ${player.username} (${player.userId})`);
+          
+          // Respawn player - resets floor to spawn, position, character, and health
+          await playerService.respawnPlayer(
+            player.userId,
+            spawnFloor,
+            player.character, // Keep existing character data
+            player.username,
+            player.email
+          );
+          
+          console.log(`✅ Successfully respawned ${player.username}`);
+        } catch (error) {
+          console.error(`❌ Failed to respawn player ${player.username}:`, error);
+        }
+      }
+      
+      console.log(`✅ Player respawn completed. ${allPlayers.length} players processed.`);
+    }
+    
     // Close the database connection from the service to ensure clean state
     const { closeDatabase } = await import('../src/config/database');
     await closeDatabase();
     
-    console.log('✅ Dungeon migration completed successfully!');
+    console.log('✅ Dungeon regeneration and player respawn completed successfully!');
     
   } catch (error) {
     console.error('❌ Migration failed:', error);
