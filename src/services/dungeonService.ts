@@ -10,8 +10,8 @@ import { WallGenerator } from './wallGenerator';
  * 2. Floor DAG: Represents the room/hallway layout within each individual floor
  */
 export class DungeonService {
-  private readonly ROOM_COUNT_MIN = 5;
-  private readonly ROOM_COUNT_MAX = 15;
+  private readonly ROOM_COUNT_MIN = 10;
+  private readonly ROOM_COUNT_MAX = 25;
   private readonly ROOM_SIZE_MIN = 5;
   private readonly ROOM_SIZE_MAX = 15;
   private readonly HALLWAY_LENGTH_MIN = 15;
@@ -92,8 +92,8 @@ export class DungeonService {
   private async generateDungeonChildren(parentNode: DungeonDagNode): Promise<void> {
     const db = getDatabase();
     
-    // Generate 1-2 downward stairs
-    const downStairCount = Math.floor(Math.random() * 2) + 1;
+    // Generate 1-5 downward stairs
+    const downStairCount = Math.floor(Math.random() * 5) + 1;
     const children: string[] = [];
     
     for (let i = 0; i < downStairCount; i++) {
