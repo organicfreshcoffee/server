@@ -33,7 +33,8 @@ export class DungeonService {
       name: 'A',
       children: [],
       isDownwardsFromParent: false, // Root has no parent
-      isBossLevel: false
+      isBossLevel: false,
+      visitedByUserIds: [] // Initialize empty array for tracking visitors
     };
 
     await db.collection('dungeonDagNodes').insertOne(rootDungeonNode);
@@ -103,7 +104,8 @@ export class DungeonService {
         name: childName,
         children: [],
         isDownwardsFromParent: true,
-        isBossLevel: Math.random() < 0.1 // 10% chance of boss level
+        isBossLevel: Math.random() < 0.1, // 10% chance of boss level
+        visitedByUserIds: [] // Initialize empty array for tracking visitors
       };
       
       await db.collection('dungeonDagNodes').insertOne(childNode);
@@ -352,7 +354,8 @@ export class DungeonService {
           children: [],
           isDownwardsFromParent: true,
           isBossLevel: Math.random() < 0.1, // 10% chance of boss level
-          parentFloorDagNodeName: room.name
+          parentFloorDagNodeName: room.name,
+          visitedByUserIds: [] // Initialize empty array for tracking visitors
         };
         
         await db.collection('dungeonDagNodes').insertOne(childNode);
@@ -615,5 +618,59 @@ export class DungeonService {
       console.error('Error generating complete tile data:', error);
       return null;
     }
+  }
+
+  /**
+   * Mark a dungeon node as visited by a user
+   */
+  async markDungeonNodeVisited(dungeonDagNodeName: string, userId: string): Promise<void> {
+    const db = getDatabase();
+    
+    // Use $addToSet to add userId to visitedByUserIds array only if it's not already there
+    await db.collection('dungeonDagNodes').updateOne(
+      { name: dungeonDagNodeName },
+      { $addToSet: { visitedByUserIds: userId } }
+    );
+  }
+
+  /**
+   * Check if a user has visited a dungeon node
+   */
+  async hasUserVisitedDungeonNode(dungeonDagNodeName: string, userId: string): Promise<boolean> {
+    const db = getDatabase();
+    
+    const dungeonNode = await db.collection('dungeonDagNodes')
+      .findOne({ 
+        name: dungeonDagNodeName,
+        visitedByUserIds: userId 
+      }) as unknown as DungeonDagNode | null;
+    
+    return dungeonNode !== null;
+  }
+
+  /**
+   * Get all users who have visited a dungeon node
+   */
+  async getDungeonNodeVisitors(dungeonDagNodeName: string): Promise<string[]> {
+    const db = getDatabase();
+    
+    const dungeonNode = await db.collection('dungeonDagNodes')
+      .findOne({ name: dungeonDagNodeName }) as unknown as DungeonDagNode | null;
+    
+    return dungeonNode?.visitedByUserIds || [];
+  }
+
+  /**
+   * Get all dungeon nodes visited by a user
+   */
+  async getDungeonNodesVisitedByUser(userId: string): Promise<string[]> {
+    const db = getDatabase();
+    
+    const dungeonNodes = await db.collection('dungeonDagNodes')
+      .find({ visitedByUserIds: userId })
+      .limit(0) // 0 means no limit - get all results
+      .toArray() as unknown as DungeonDagNode[];
+    
+    return dungeonNodes.map(node => node.name);
   }
 }
