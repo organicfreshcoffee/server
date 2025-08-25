@@ -9,7 +9,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3002
-      - AUTH_SERVER_URL=http://host.docker.internal:3001
+      - AUTH_SERVER_URL=https://auth.organicfreshcoffee.com
       - MONGODB_URI=mongodb://admin:password@mongodb:27017/gamedb?authSource=admin
     depends_on:
       - mongodb
