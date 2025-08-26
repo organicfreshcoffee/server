@@ -155,6 +155,16 @@ export class DungeonService {
     await db.collection('dungeonDagNodes').insertOne(rootDungeonNode);
     await this.generateFloor(rootDungeonNode.name, false, 0, 3); // Root floor without upward stair (it's the spawn), max depth 3
 
+    // Validate and fix stair positions for the root floor
+    const rootFloorNodes = await db.collection('floorDagNodes')
+      .find({ dungeonDagNodeName: rootDungeonNode.name })
+      .toArray() as unknown as FloorDagNode[];
+    
+    if (rootFloorNodes.length > 0) {
+      await this.validateAndFixStairPositions(rootDungeonNode.name, rootFloorNodes);
+      console.log(`✅ Validated stair positions for root floor ${rootDungeonNode.name}`);
+    }
+
     // Get spawn location for player respawning
     const spawnFloor = await this.getSpawn();
     if (spawnFloor) {
@@ -197,7 +207,7 @@ export class DungeonService {
 
   /**
    * Check if we need to generate more floors based on player movement
-   * If the destination floor has no children, generate new children floors
+   * Generates children and grandchildren (2 levels deep) to provide buffer time
    */
   async checkAndGenerateFloors(newFloorName: string): Promise<void> {
     const db = getDatabase();
@@ -211,19 +221,7 @@ export class DungeonService {
       return;
     }
     
-    // Check if this node has children - if it does, no generation needed
-    if (targetDungeonNode.children.length > 0) {
-      console.log(`Dungeon node ${newFloorName} already has ${targetDungeonNode.children.length} children, no generation needed`);
-      return;
-    }
-    
-    // If it's a boss level, don't generate children
-    if (targetDungeonNode.isBossLevel) {
-      console.log(`Dungeon node ${newFloorName} is a boss level, not generating children`);
-      return;
-    }
-    
-    console.log(`Generating children for dungeon node ${newFloorName}...`);
+    console.log(`Checking generation needs for dungeon node ${newFloorName}...`);
     
     // Calculate current depth for generation limits
     const allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
@@ -231,15 +229,54 @@ export class DungeonService {
     const currentDepth = depthMap[newFloorName] || 0;
     const maxDepth = currentDepth + 6; // Allow generation up to 6 levels deeper
     
-    // Generate children for this dungeon node
-    await this.generateDungeonChildren(targetDungeonNode);
+    let generationPerformed = false;
     
-    // Get the updated node with children
-    const updatedNode = await db.collection('dungeonDagNodes')
+    // Level 1: Generate children for the target node if it has none
+    if (targetDungeonNode.children.length === 0 && !targetDungeonNode.isBossLevel) {
+      console.log(`Generating children for dungeon node ${newFloorName} (level 1)...`);
+      await this.generateDungeonChildren(targetDungeonNode, maxDepth);
+      generationPerformed = true;
+    }
+    
+    // Level 2: Check children and generate grandchildren if needed
+    const updatedTargetNode = await db.collection('dungeonDagNodes')
       .findOne({ name: newFloorName }) as unknown as DungeonDagNode | null;
     
-    if (updatedNode && updatedNode.children.length > 0) {
-      console.log(`✅ Generated ${updatedNode.children.length} children for dungeon node ${newFloorName}: ${updatedNode.children.join(', ')}`);
+    if (updatedTargetNode && updatedTargetNode.children.length > 0) {
+      for (const childName of updatedTargetNode.children) {
+        const childNode = await db.collection('dungeonDagNodes')
+          .findOne({ name: childName }) as unknown as DungeonDagNode | null;
+        
+        if (childNode && childNode.children.length === 0 && !childNode.isBossLevel) {
+          console.log(`Generating grandchildren for dungeon node ${childName} (level 2)...`);
+          await this.generateDungeonChildren(childNode, maxDepth);
+          generationPerformed = true;
+        }
+      }
+    }
+    
+    if (generationPerformed) {
+      // Get final state for logging
+      const finalTargetNode = await db.collection('dungeonDagNodes')
+        .findOne({ name: newFloorName }) as unknown as DungeonDagNode | null;
+      
+      if (finalTargetNode) {
+        console.log(`✅ Generation complete for ${newFloorName}:`);
+        console.log(`  - Children: ${finalTargetNode.children.length > 0 ? finalTargetNode.children.join(', ') : 'none'}`);
+        
+        // Log grandchildren info
+        let grandchildrenCount = 0;
+        for (const childName of finalTargetNode.children) {
+          const childNode = await db.collection('dungeonDagNodes')
+            .findOne({ name: childName }) as unknown as DungeonDagNode | null;
+          if (childNode) {
+            grandchildrenCount += childNode.children.length;
+          }
+        }
+        console.log(`  - Total grandchildren: ${grandchildrenCount}`);
+      }
+    } else {
+      console.log(`No generation needed for ${newFloorName} - already has sufficient structure`);
     }
   }
 
