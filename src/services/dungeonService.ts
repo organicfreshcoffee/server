@@ -4,6 +4,51 @@ import { ServerFloorGenerator } from './floorGenerator';
 import { GeneratedFloorData, GeneratedFloorTileData, FloorTileCoordinates, ServerRoom } from '../types/floorGeneration';
 import { WallGenerator } from './wallGenerator';
 import { v4 as uuidv4 } from 'uuid';
+import * as crypto from 'crypto';
+
+/**
+ * Seeded random number generator using a simple LCG (Linear Congruential Generator)
+ * This ensures deterministic random numbers based on a seed
+ */
+class SeededRandom {
+  private seed: number;
+
+  constructor(seed: string) {
+    // Convert string seed to numeric seed using a simple hash
+    this.seed = this.hashString(seed);
+  }
+
+  private hashString(str: string): number {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return Math.abs(hash);
+  }
+
+  // Linear Congruential Generator
+  next(): number {
+    this.seed = (this.seed * 1664525 + 1013904223) % Math.pow(2, 32);
+    return this.seed / Math.pow(2, 32);
+  }
+
+  // Generate random integer between min and max (inclusive)
+  nextInt(min: number, max: number): number {
+    return Math.floor(this.next() * (max - min + 1)) + min;
+  }
+
+  // Generate random float between 0 and 1
+  nextFloat(): number {
+    return this.next();
+  }
+
+  // Generate random boolean with optional probability
+  nextBoolean(probability: number = 0.5): boolean {
+    return this.next() < probability;
+  }
+}
 
 /**
  * DungeonService manages the procedural generation of dungeon structures using two separate DAGs:
@@ -18,6 +63,45 @@ export class DungeonService {
   private readonly HALLWAY_LENGTH_MIN = 15;
   private readonly HALLWAY_LENGTH_MAX = 30;
   private readonly GENERATION_BUFFER = 3; // Generate floors when player is within 3 levels
+
+  private dungeonSeed: string | null = null;
+
+  /**
+   * Get the current dungeon seed from the database
+   */
+  private async getDungeonSeed(): Promise<string> {
+    if (this.dungeonSeed) {
+      return this.dungeonSeed;
+    }
+
+    const db = getDatabase();
+    const seedDoc = await db.collection('dungeon_seed').findOne({});
+    
+    if (!seedDoc || !seedDoc.seed) {
+      throw new Error('No dungeon seed found in database. Please run initializeDungeon first.');
+    }
+
+    this.dungeonSeed = seedDoc.seed;
+    return this.dungeonSeed as string; // Safe assertion since we check above
+  }
+
+  /**
+   * Create a seeded random generator for dungeon-level operations
+   */
+  private async createDungeonRandom(): Promise<SeededRandom> {
+    const seed = await this.getDungeonSeed();
+    return new SeededRandom(seed);
+  }
+
+  /**
+   * Create a seeded random generator for floor-level operations
+   * Combines dungeon seed with floor name for unique but deterministic randomness
+   */
+  private async createFloorRandom(floorName: string): Promise<SeededRandom> {
+    const dungeonSeed = await this.getDungeonSeed();
+    const combinedSeed = `${dungeonSeed}_${floorName}`;
+    return new SeededRandom(combinedSeed);
+  }
 
   /**
    * Initialize the dungeon with the root floor and randomly generated levels
@@ -35,16 +119,22 @@ export class DungeonService {
       await db.collection('dungeon_seed').deleteMany({});
       await db.collection('dungeon_seed').insertOne({ seed: dungeonSeed });
       
+      // Clear cached seed so it gets reloaded
+      this.dungeonSeed = null;
+      
       console.log(`Dungeon seed set to: ${dungeonSeed}`);
     } else {
       // Reuse current seed - check if one exists
       const existingSeed = await db.collection('dungeon_seed').findOne({});
       if (existingSeed) {
         console.log(`Reusing existing dungeon seed: ${existingSeed.seed}`);
+        // Update cache
+        this.dungeonSeed = existingSeed.seed;
       } else {
         // No existing seed found, create a new one
         const dungeonSeed = seed || uuidv4();
         await db.collection('dungeon_seed').insertOne({ seed: dungeonSeed });
+        this.dungeonSeed = dungeonSeed;
         console.log(`No existing seed found, created new seed: ${dungeonSeed}`);
       }
     }
@@ -152,9 +242,10 @@ export class DungeonService {
    */
   private async generateDungeonChildren(parentNode: DungeonDagNode): Promise<void> {
     const db = getDatabase();
+    const dungeonRandom = await this.createDungeonRandom();
 
-    // Generate 2-5 downward stairs
-    const downStairCount = Math.floor(Math.random() * 4) + 2;
+    // Generate 2-5 downward stairs using seeded randomness
+    const downStairCount = dungeonRandom.nextInt(2, 5);
     const children: string[] = [];
     
     for (let i = 0; i < downStairCount; i++) {
@@ -165,7 +256,7 @@ export class DungeonService {
         name: childName,
         children: [],
         isDownwardsFromParent: true,
-        isBossLevel: Math.random() < 0.1, // 10% chance of boss level
+        isBossLevel: dungeonRandom.nextBoolean(0.1), // 10% chance of boss level
         visitedByUserIds: [] // Initialize empty array for tracking visitors
       };
       
@@ -199,10 +290,11 @@ export class DungeonService {
    */
   private async generateFloor(dungeonNodeName: string, hasUpwardStair: boolean, depth: number = 0, maxDepth: number = 12): Promise<void> {
     const db = getDatabase();
+    const floorRandom = await this.createFloorRandom(dungeonNodeName);
     
     // Generate root room
     const rootRoomName = `${dungeonNodeName}_A`;
-    const targetRoomCount = Math.floor(Math.random() * (this.ROOM_COUNT_MAX - this.ROOM_COUNT_MIN + 1)) + this.ROOM_COUNT_MIN;
+    const targetRoomCount = floorRandom.nextInt(this.ROOM_COUNT_MIN, this.ROOM_COUNT_MAX);
     
     const floorNodes: FloorDagNode[] = [];
     const roomCount = { count: 1 }; // Use object to pass by reference
@@ -241,6 +333,8 @@ export class DungeonService {
       return;
     }
 
+    const floorRandom = await this.createFloorRandom(dungeonNodeName);
+
     // Use a queue for breadth-first generation to ensure balanced exploration
     const nodeQueue: FloorDagNode[] = [parentNode];
     let iterationCount = 0;
@@ -257,15 +351,15 @@ export class DungeonService {
           break;
         }
         
-        // Generate children for current node
-        const childrenCount = Math.floor(Math.random() * 4) + 1; // 1-4 children for better balance
+        // Generate children for current node using seeded randomness
+        const childrenCount = floorRandom.nextInt(1, 4); // 1-4 children for better balance
         const children: string[] = [];
         
         // Decrease chance of generation as we get closer to target
         const remainingRooms = targetRoomCount - roomCount.count;
         const generationChance = Math.min(0.8, remainingRooms / (targetRoomCount * 0.3));
         
-        if (Math.random() > generationChance && roomCount.count > targetRoomCount * 0.5) {
+        if (floorRandom.nextFloat() > generationChance && roomCount.count > targetRoomCount * 0.5) {
           continue; // Skip generation for this node occasionally to create variation
         }
 
@@ -277,30 +371,30 @@ export class DungeonService {
 
           if (currentNode.isRoom) {
             // Parent is room, child is hallway
-            childNode = this.generateHallwayNode(childName, dungeonNodeName);
-            childNode.parentDirection = this.getRandomDirection();
+            childNode = this.generateHallwayNode(childName, dungeonNodeName, floorRandom);
+            childNode.parentDirection = this.getRandomDirection(floorRandom);
             // Calculate parentDoorOffset for hallway connecting to room
             const parentMinSide = Math.min(currentNode.roomWidth || 8, currentNode.roomHeight || 8);
-            childNode.parentDoorOffset = Math.floor(Math.random() * Math.max(1, parentMinSide - 1)) + 1;
+            childNode.parentDoorOffset = floorRandom.nextInt(1, Math.max(1, parentMinSide - 1));
             // Set door location on parent room
-            this.setDoorLocation(currentNode, i, childrenCount);
+            this.setDoorLocation(currentNode, i, childrenCount, floorRandom);
           } else {
             // Parent is hallway, child can be room or hallway
             // Force room generation if we're running low on iterations and need more rooms
             const remainingRooms = targetRoomCount - roomCount.count;
             const forceRoom = remainingRooms > 0 && iterationCount > maxIterations * 0.7;
-            const isRoom = forceRoom || Math.random() < 0.6; // 60% chance of room, or forced if needed
+            const isRoom = forceRoom || floorRandom.nextBoolean(0.6); // 60% chance of room, or forced if needed
             
             if (isRoom) {
-              childNode = await this.generateRoomNode(childName, dungeonNodeName, false);
+              childNode = await this.generateRoomNode(childName, dungeonNodeName, false, floorRandom);
               roomCount.count++;
               // Calculate parentDoorOffset as random number from 1 to min(width, height) - 1
               const minSide = Math.min(childNode.roomWidth || 8, childNode.roomHeight || 8);
-              childNode.parentDoorOffset = Math.floor(Math.random() * Math.max(1, minSide - 1)) + 1;
-              childNode.parentDirection = this.getRandomDirection();
+              childNode.parentDoorOffset = floorRandom.nextInt(1, Math.max(1, minSide - 1));
+              childNode.parentDirection = this.getRandomDirection(floorRandom);
             } else {
-              childNode = this.generateHallwayNode(childName, dungeonNodeName);
-              childNode.parentDirection = this.getRandomDirection();
+              childNode = this.generateHallwayNode(childName, dungeonNodeName, floorRandom);
+              childNode.parentDirection = this.getRandomDirection(floorRandom);
             }
           }
 
@@ -317,9 +411,12 @@ export class DungeonService {
   /**
    * Generate a room node
    */
-  private async generateRoomNode(name: string, dungeonNodeName: string, hasUpwardStair: boolean): Promise<FloorDagNode> {
-    const roomWidth = Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN;
-    const roomHeight = Math.floor(Math.random() * (this.ROOM_SIZE_MAX - this.ROOM_SIZE_MIN + 1)) + this.ROOM_SIZE_MIN;
+  private async generateRoomNode(name: string, dungeonNodeName: string, hasUpwardStair: boolean, floorRandom?: SeededRandom): Promise<FloorDagNode> {
+    // Use the passed random generator or create a new one for this specific room
+    const random = floorRandom || await this.createFloorRandom(name);
+    
+    const roomWidth = random.nextInt(this.ROOM_SIZE_MIN, this.ROOM_SIZE_MAX);
+    const roomHeight = random.nextInt(this.ROOM_SIZE_MIN, this.ROOM_SIZE_MAX);
     
     const room: FloorDagNode = {
       name,
@@ -336,8 +433,8 @@ export class DungeonService {
     if (hasUpwardStair) {
       // For upward stairs, use a simple placement initially
       // We'll validate and potentially relocate after floor generation
-      room.stairLocationX = Math.floor(Math.random() * roomWidth);
-      room.stairLocationY = Math.floor(Math.random() * roomHeight);
+      room.stairLocationX = random.nextInt(0, roomWidth - 1);
+      room.stairLocationY = random.nextInt(0, roomHeight - 1);
       
       // Find parent dungeon node to set up upward stair connection
       const db = getDatabase();
@@ -365,24 +462,29 @@ export class DungeonService {
   /**
    * Generate a hallway node
    */
-  private generateHallwayNode(name: string, dungeonNodeName: string): FloorDagNode {
+  private generateHallwayNode(name: string, dungeonNodeName: string, floorRandom?: SeededRandom): FloorDagNode {
+    // Use the passed random generator or create a simple fallback
+    const hallwayLength = floorRandom 
+      ? floorRandom.nextInt(this.HALLWAY_LENGTH_MIN, this.HALLWAY_LENGTH_MAX)
+      : Math.floor(Math.random() * (this.HALLWAY_LENGTH_MAX - this.HALLWAY_LENGTH_MIN + 1)) + this.HALLWAY_LENGTH_MIN;
+    
     return {
       name,
       dungeonDagNodeName: dungeonNodeName,
       children: [],
       isRoom: false,
-      hallwayLength: Math.floor(Math.random() * (this.HALLWAY_LENGTH_MAX - this.HALLWAY_LENGTH_MIN + 1)) + this.HALLWAY_LENGTH_MIN
+      hallwayLength
     };
   }
 
   /**
    * Set door location on a room
    */
-  private setDoorLocation(roomNode: FloorDagNode, doorIndex: number, _totalDoors: number): void {
+  private setDoorLocation(roomNode: FloorDagNode, doorIndex: number, _totalDoors: number, floorRandom?: SeededRandom): void {
     if (!roomNode.roomWidth || !roomNode.roomHeight) return;
     
-    // Simple door placement - distribute along walls
-    const side = doorIndex % 4; // 0: top, 1: right, 2: bottom, 3: left
+    // Simple door placement - distribute along walls using seeded randomness
+    const side = floorRandom ? floorRandom.nextInt(0, 3) : doorIndex % 4; // 0: top, 1: right, 2: bottom, 3: left
     
     switch (side) {
       case 0: // top
@@ -402,8 +504,9 @@ export class DungeonService {
    */
   private async placeDownwardStairsAndCreateChildren(floorNodes: FloorDagNode[], dungeonNodeName: string, depth: number, maxDepth: number): Promise<void> {
     const db = getDatabase();
+    const dungeonRandom = await this.createDungeonRandom();
     const rooms = floorNodes.filter(node => node.isRoom);
-    const stairCount = Math.floor(Math.random() * 4) + 2; // 2-5 stairs
+    const stairCount = dungeonRandom.nextInt(2, 5); // 2-5 stairs using seeded randomness
     const childrenNames: string[] = [];
     const roomsToUpdate: FloorDagNode[] = [];
     
@@ -415,7 +518,7 @@ export class DungeonService {
         break;
       }
       
-      const room = availableRooms[Math.floor(Math.random() * availableRooms.length)];
+      const room = availableRooms[dungeonRandom.nextInt(0, availableRooms.length - 1)];
       
       // Create child dungeon node
       const childName = this.generateChildName(dungeonNodeName, i);
@@ -425,7 +528,7 @@ export class DungeonService {
         name: childName,
         children: [],
         isDownwardsFromParent: true,
-        isBossLevel: Math.random() < 0.1, // 10% chance of boss level
+        isBossLevel: dungeonRandom.nextBoolean(0.1), // 10% chance of boss level
         parentFloorDagNodeName: room.name,
         visitedByUserIds: [] // Initialize empty array for tracking visitors
       };
@@ -589,11 +692,14 @@ export class DungeonService {
       return null;
     }
 
+    // Create a seeded random generator for this specific room's stair relocation
+    const roomRandom = await this.createFloorRandom(`${room.name}_stair_fix`);
+
     // Try to find a valid position within the room bounds
     const maxAttempts = 50;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const localX = Math.floor(Math.random() * room.width);
-      const localY = Math.floor(Math.random() * room.height);
+      const localX = roomRandom.nextInt(0, room.width - 1);
+      const localY = roomRandom.nextInt(0, room.height - 1);
       
       // Convert to global coordinates for checking
       const globalX = room.position.x + localX;
@@ -636,13 +742,16 @@ export class DungeonService {
       return null;
     }
 
+    // Create a seeded random generator for this specific room's stair placement
+    const roomRandom = await this.createFloorRandom(`${room.name}_stair`);
+
     // Get the generated floor tile data to check for conflicts
     const generatedFloorData = await this.getGeneratedFloorTileData(dungeonNodeName);
     if (!generatedFloorData) {
       // If we can't get tile data, fallback to simple random placement
       return {
-        x: Math.floor(Math.random() * room.roomWidth),
-        y: Math.floor(Math.random() * room.roomHeight)
+        x: roomRandom.nextInt(0, room.roomWidth - 1),
+        y: roomRandom.nextInt(0, room.roomHeight - 1)
       };
     }
 
@@ -661,8 +770,8 @@ export class DungeonService {
     // Try to find a valid position within the room bounds
     const maxAttempts = 50;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const x = Math.floor(Math.random() * room.roomWidth);
-      const y = Math.floor(Math.random() * room.roomHeight);
+      const x = roomRandom.nextInt(0, room.roomWidth - 1);
+      const y = roomRandom.nextInt(0, room.roomHeight - 1);
       const positionKey = `${x},${y}`;
       
       // Check if this position conflicts with existing tiles
@@ -683,16 +792,19 @@ export class DungeonService {
     // As a last resort, return a random position (better than failing completely)
     console.warn(`Could not find ideal stair location for room ${room.name}, using fallback position`);
     return {
-      x: Math.floor(Math.random() * room.roomWidth),
-      y: Math.floor(Math.random() * room.roomHeight)
+      x: roomRandom.nextInt(0, room.roomWidth - 1),
+      y: roomRandom.nextInt(0, room.roomHeight - 1)
     };
   }
 
   /**
    * Get random direction for hallway branching
    */
-  private getRandomDirection(): 'left' | 'right' | 'center' {
+  private getRandomDirection(floorRandom?: SeededRandom): 'left' | 'right' | 'center' {
     const directions: ('left' | 'right' | 'center')[] = ['left', 'right', 'center'];
+    if (floorRandom) {
+      return directions[floorRandom.nextInt(0, directions.length - 1)];
+    }
     return directions[Math.floor(Math.random() * directions.length)];
   }
 
