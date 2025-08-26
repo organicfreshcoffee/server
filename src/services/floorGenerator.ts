@@ -61,7 +61,7 @@ export class ServerFloorGenerator {
     
     // Generate floor tiles with type information (excluding downward stair positions)
     const roomTiles = this.generateRoomTiles(rooms, downwardStairPositions);
-    const hallwayTiles = ServerHallwayGenerator.generateMultipleHallwayFloors(hallways);
+    const hallwayTiles = ServerHallwayGenerator.generateMultipleHallwayFloors(hallways, { excludePositions: downwardStairPositions });
     
     // Combine all floor tiles with type information
     const allFloorTiles: FloorTile[] = [];
@@ -473,7 +473,8 @@ export class ServerHallwayGenerator {
   private static readonly DEFAULT_OPTIONS: Required<HallwayGenerationOptions> = {
     width: 1,
     cornerRadius: 1,
-    minimizeOverlaps: true
+    minimizeOverlaps: true,
+    excludePositions: []
   };
 
   /**
@@ -501,6 +502,19 @@ export class ServerHallwayGenerator {
     // Remove duplicates to avoid overlaps
     if (opts.minimizeOverlaps) {
       coordinates = this.removeDuplicateFloorTiles(coordinates);
+    }
+
+    // Filter out excluded positions (like stair locations)
+    if (opts.excludePositions && opts.excludePositions.length > 0) {
+      const excludedPositions = new Set<string>();
+      opts.excludePositions.forEach(pos => {
+        excludedPositions.add(`${pos.x},${pos.y}`);
+      });
+      
+      coordinates = coordinates.filter(coord => {
+        const posKey = `${coord.x},${coord.y}`;
+        return !excludedPositions.has(posKey);
+      });
     }
 
     console.log(`🛤️ Generated ${coordinates.length} floor cubes for hallway ${hallway.name}`);

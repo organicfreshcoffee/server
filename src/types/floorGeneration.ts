@@ -103,4 +103,5 @@ export interface HallwayGenerationOptions {
   width?: number;
   cornerRadius?: number;
   minimizeOverlaps?: boolean;
+  excludePositions?: CubePosition[];
 }
