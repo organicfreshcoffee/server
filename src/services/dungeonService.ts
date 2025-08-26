@@ -38,7 +38,43 @@ export class DungeonService {
     };
 
     await db.collection('dungeonDagNodes').insertOne(rootDungeonNode);
-    await this.generateFloor(rootDungeonNode.name, true, 0, 3); // Root floor with upward stair, max depth 3
+    await this.generateFloor(rootDungeonNode.name, false, 0, 3); // Root floor without upward stair (it's the spawn), max depth 3
+
+    // Get spawn location for player respawning
+    const spawnFloor = await this.getSpawn();
+    if (spawnFloor) {
+      console.log(`✅ Spawn location determined: ${spawnFloor}`);
+      
+      // Initialize PlayerService and respawn all players
+      const { PlayerService } = await import('./playerService');
+      const playerService = new PlayerService();
+      const allPlayers = await playerService.getAllPlayers();
+      
+      console.log(`Found ${allPlayers.length} players to respawn...`);
+      
+      for (const player of allPlayers) {
+        try {
+          console.log(`Respawning player: ${player.username} (${player.userId})`);
+          
+          // Respawn player - resets floor to spawn, position, character, and health
+          await playerService.respawnPlayer(
+            player.userId,
+            spawnFloor,
+            player.character, // Keep existing character data
+            player.username,
+            player.email
+          );
+          
+          console.log(`✅ Successfully respawned ${player.username}`);
+        } catch (error) {
+          console.error(`❌ Failed to respawn player ${player.username}:`, error);
+        }
+      }
+      
+      console.log(`✅ Player respawn completed. ${allPlayers.length} players processed.`);
+    } else {
+      console.error('❌ Could not determine spawn location. Skipping player respawn.');
+    }
 
     // eslint-disable-next-line no-console
     console.log('Dungeon initialized with root floor A');
@@ -161,6 +197,9 @@ export class DungeonService {
       // Randomly place downward stairs in rooms and create child dungeon nodes
       await this.placeDownwardStairsAndCreateChildren(floorNodes, dungeonNodeName, depth, maxDepth);
     }
+
+    // Validate and fix stair positions after floor generation is complete
+    await this.validateAndFixStairPositions(dungeonNodeName, floorNodes);
   }
 
   /**
@@ -270,6 +309,8 @@ export class DungeonService {
     
     // Set stair location coordinates and connections when hasUpwardStair is true
     if (hasUpwardStair) {
+      // For upward stairs, use a simple placement initially
+      // We'll validate and potentially relocate after floor generation
       room.stairLocationX = Math.floor(Math.random() * roomWidth);
       room.stairLocationY = Math.floor(Math.random() * roomHeight);
       
@@ -342,8 +383,8 @@ export class DungeonService {
     const roomsToUpdate: FloorDagNode[] = [];
     
     for (let i = 0; i < Math.min(stairCount, rooms.length); i++) {
-      // Find a room that doesn't already have a downward stair
-      const availableRooms = rooms.filter(r => !r.hasDownwardStair);
+      // Find a room that doesn't already have a downward stair AND doesn't have an upward stair
+      const availableRooms = rooms.filter(r => !r.hasDownwardStair && !r.hasUpwardStair);
       if (availableRooms.length === 0) {
         console.log(`No more rooms available for downward stairs on floor ${dungeonNodeName}`);
         break;
@@ -366,16 +407,23 @@ export class DungeonService {
       
       await db.collection('dungeonDagNodes').insertOne(childNode);
       
+      // Generate valid stair location that doesn't conflict with floor/wall tiles
+      const stairLocation = await this.generateValidStairLocation(room, dungeonNodeName);
+      if (!stairLocation) {
+        console.log(`Could not find valid stair location for room ${room.name}, skipping...`);
+        continue;
+      }
+      
       // Set up the downward stair in the room
       room.hasDownwardStair = true;
-      room.stairLocationX = Math.floor(Math.random() * (room.roomWidth || 10));
-      room.stairLocationY = Math.floor(Math.random() * (room.roomHeight || 10));
+      room.stairLocationX = stairLocation.x;
+      room.stairLocationY = stairLocation.y;
       room.stairDungeonDagName = childName;
       room.stairFloorDagName = `${childName}_A`; // Child floor's root room
       
       roomsToUpdate.push(room);
       
-      console.log(`Creating downward stair in room ${room.name} leading to dungeon ${childName}`);
+      console.log(`Creating downward stair in room ${room.name} at (${stairLocation.x}, ${stairLocation.y}) leading to dungeon ${childName}`);
       
       // Generate the child floor with upward stair - pass depth + 1
       await this.generateFloor(childName, true, depth + 1, maxDepth);
@@ -407,11 +455,184 @@ export class DungeonService {
   }
 
   /**
+   * Validate and fix stair positions to ensure they don't conflict with floor/wall tiles
+   */
+  private async validateAndFixStairPositions(dungeonNodeName: string, floorNodes: FloorDagNode[]): Promise<void> {
+    const db = getDatabase();
+    const roomsWithStairs = floorNodes.filter(node => 
+      node.isRoom && (node.hasUpwardStair || node.hasDownwardStair)
+    );
+
+    if (roomsWithStairs.length === 0) {
+      return;
+    }
+
+    // Get the generated floor tile data to check for conflicts
+    const generatedFloorData = await this.getGeneratedFloorTileData(dungeonNodeName);
+    if (!generatedFloorData) {
+      console.warn(`Could not get tile data for ${dungeonNodeName}, skipping stair validation`);
+      return;
+    }
+
+    // Create sets of occupied positions for quick lookup
+    const floorTilePositions = new Set<string>();
+    const wallTilePositions = new Set<string>();
+    
+    generatedFloorData.tiles.floorTiles.forEach(tile => {
+      floorTilePositions.add(`${tile.x},${tile.y}`);
+    });
+    
+    generatedFloorData.tiles.wallTiles.forEach(tile => {
+      wallTilePositions.add(`${tile.x},${tile.y}`);
+    });
+
+    const roomsToUpdate: FloorDagNode[] = [];
+
+    for (const room of roomsWithStairs) {
+      if (room.stairLocationX === undefined || room.stairLocationY === undefined) {
+        continue;
+      }
+
+      const currentStairKey = `${room.stairLocationX},${room.stairLocationY}`;
+      
+      // Check if current stair position conflicts with floor or wall tiles
+      if (floorTilePositions.has(currentStairKey) || wallTilePositions.has(currentStairKey)) {
+        console.log(`Stair position conflict detected for room ${room.name} at (${room.stairLocationX}, ${room.stairLocationY}), finding new position...`);
+        
+        // Find a new valid position
+        const newPosition = await this.findValidStairPositionForRoom(room, floorTilePositions, wallTilePositions);
+        if (newPosition) {
+          room.stairLocationX = newPosition.x;
+          room.stairLocationY = newPosition.y;
+          roomsToUpdate.push(room);
+          console.log(`Moved stair for room ${room.name} to new position (${newPosition.x}, ${newPosition.y})`);
+        } else {
+          console.warn(`Could not find valid stair position for room ${room.name}, keeping current position`);
+        }
+      }
+    }
+
+    // Update the database with corrected stair positions
+    for (const room of roomsToUpdate) {
+      await db.collection('floorDagNodes').updateOne(
+        { name: room.name },
+        { 
+          $set: { 
+            stairLocationX: room.stairLocationX,
+            stairLocationY: room.stairLocationY
+          } 
+        }
+      );
+    }
+
+    if (roomsToUpdate.length > 0) {
+      console.log(`✅ Fixed stair positions for ${roomsToUpdate.length} rooms in ${dungeonNodeName}`);
+    }
+  }
+
+  /**
+   * Find a valid stair position within a room that doesn't conflict with tiles
+   */
+  private async findValidStairPositionForRoom(
+    room: FloorDagNode, 
+    floorTilePositions: Set<string>, 
+    wallTilePositions: Set<string>
+  ): Promise<{ x: number; y: number } | null> {
+    if (!room.roomWidth || !room.roomHeight) {
+      return null;
+    }
+
+    // Try to find a valid position within the room bounds
+    const maxAttempts = 50;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const x = Math.floor(Math.random() * room.roomWidth);
+      const y = Math.floor(Math.random() * room.roomHeight);
+      const positionKey = `${x},${y}`;
+      
+      // Check if this position conflicts with existing tiles
+      if (!floorTilePositions.has(positionKey) && !wallTilePositions.has(positionKey)) {
+        return { x, y };
+      }
+    }
+
+    // If we couldn't find a valid position, try the center of the room
+    const centerX = Math.floor(room.roomWidth / 2);
+    const centerY = Math.floor(room.roomHeight / 2);
+    const centerKey = `${centerX},${centerY}`;
+    
+    if (!floorTilePositions.has(centerKey) && !wallTilePositions.has(centerKey)) {
+      return { x: centerX, y: centerY };
+    }
+
+    return null;
+  }
+
+  /**
    * Generate child name using alphabetic progression
    */
   private generateChildName(parentName: string, childIndex: number): string {
     const childChar = String.fromCharCode(65 + childIndex); // A, B, C, etc.
     return `${parentName}${childChar}`;
+  }
+
+  /**
+   * Generate a valid stair location that doesn't conflict with floor or wall tiles
+   */
+  private async generateValidStairLocation(room: FloorDagNode, dungeonNodeName: string): Promise<{ x: number; y: number } | null> {
+    if (!room.roomWidth || !room.roomHeight) {
+      return null;
+    }
+
+    // Get the generated floor tile data to check for conflicts
+    const generatedFloorData = await this.getGeneratedFloorTileData(dungeonNodeName);
+    if (!generatedFloorData) {
+      // If we can't get tile data, fallback to simple random placement
+      return {
+        x: Math.floor(Math.random() * room.roomWidth),
+        y: Math.floor(Math.random() * room.roomHeight)
+      };
+    }
+
+    // Create sets of occupied positions for quick lookup
+    const floorTilePositions = new Set<string>();
+    const wallTilePositions = new Set<string>();
+    
+    generatedFloorData.tiles.floorTiles.forEach(tile => {
+      floorTilePositions.add(`${tile.x},${tile.y}`);
+    });
+    
+    generatedFloorData.tiles.wallTiles.forEach(tile => {
+      wallTilePositions.add(`${tile.x},${tile.y}`);
+    });
+
+    // Try to find a valid position within the room bounds
+    const maxAttempts = 50;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const x = Math.floor(Math.random() * room.roomWidth);
+      const y = Math.floor(Math.random() * room.roomHeight);
+      const positionKey = `${x},${y}`;
+      
+      // Check if this position conflicts with existing tiles
+      if (!floorTilePositions.has(positionKey) && !wallTilePositions.has(positionKey)) {
+        return { x, y };
+      }
+    }
+
+    // If we couldn't find a valid position, try the center of the room
+    const centerX = Math.floor(room.roomWidth / 2);
+    const centerY = Math.floor(room.roomHeight / 2);
+    const centerKey = `${centerX},${centerY}`;
+    
+    if (!floorTilePositions.has(centerKey) && !wallTilePositions.has(centerKey)) {
+      return { x: centerX, y: centerY };
+    }
+
+    // As a last resort, return a random position (better than failing completely)
+    console.warn(`Could not find ideal stair location for room ${room.name}, using fallback position`);
+    return {
+      x: Math.floor(Math.random() * room.roomWidth),
+      y: Math.floor(Math.random() * room.roomHeight)
+    };
   }
 
   /**
