@@ -4,7 +4,6 @@ import { ServerFloorGenerator } from './floorGenerator';
 import { GeneratedFloorData, GeneratedFloorTileData, FloorTileCoordinates, ServerRoom } from '../types/floorGeneration';
 import { WallGenerator } from './wallGenerator';
 import { v4 as uuidv4 } from 'uuid';
-import * as crypto from 'crypto';
 
 /**
  * Seeded random number generator using a simple LCG (Linear Congruential Generator)
