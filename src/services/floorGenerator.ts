@@ -517,7 +517,6 @@ export class ServerHallwayGenerator {
       });
     }
 
-    console.log(`🛤️ Generated ${coordinates.length} floor cubes for hallway ${hallway.name}`);
     return coordinates;
   }
 

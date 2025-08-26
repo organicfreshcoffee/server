@@ -197,52 +197,66 @@ export class DungeonService {
 
   /**
    * Check if we need to generate more floors based on player movement
+   * If the destination floor has no children, generate new children floors
    */
-  async checkAndGenerateFloors(newFloorName: string, playerLevels: string[]): Promise<void> {
+  async checkAndGenerateFloors(newFloorName: string): Promise<void> {
     const db = getDatabase();
     
-    // Get all existing dungeon nodes
-    const allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
+    // Find the dungeon node for the floor the player is traveling to
+    const targetDungeonNode = await db.collection('dungeonDagNodes')
+      .findOne({ name: newFloorName }) as unknown as DungeonDagNode | null;
     
-    // Calculate depths of all floors
-    const depthMap = this.calculateDepths(allNodes);
-    
-    // Find the deepest player level
-    let deepestPlayerLevel = 0;
-    for (const playerLevel of playerLevels) {
-      const playerDepth = depthMap[playerLevel] || 0;
-      deepestPlayerLevel = Math.max(deepestPlayerLevel, playerDepth);
+    if (!targetDungeonNode) {
+      console.log(`Target dungeon node ${newFloorName} not found, no generation needed`);
+      return;
     }
-
-    // Find leaf nodes (nodes with no children) that aren't boss levels and are close to players
-    const leafNodes = allNodes.filter(node => 
-      node.children.length === 0 && 
-      !node.isBossLevel &&
-      (depthMap[node.name] || 0) <= deepestPlayerLevel + this.GENERATION_BUFFER
-    );
-
-    if (leafNodes.length > 0) {
-      // Use balanced generation for nearby leaf nodes
-      const nodeQueue = leafNodes.map(node => ({ 
-        node, 
-        depth: depthMap[node.name] || 0 
-      }));
-      
-      const currentNodeCount = allNodes.length;
-      const generatedCount = { count: currentNodeCount };
-      const maxNodes = currentNodeCount + 10; // Limit additional nodes
-      const maxDepth = deepestPlayerLevel + this.GENERATION_BUFFER + 3;
-      
-      await this.generateDungeonRecursive(nodeQueue, maxDepth, generatedCount, maxNodes);
+    
+    // Check if this node has children - if it does, no generation needed
+    if (targetDungeonNode.children.length > 0) {
+      console.log(`Dungeon node ${newFloorName} already has ${targetDungeonNode.children.length} children, no generation needed`);
+      return;
+    }
+    
+    // If it's a boss level, don't generate children
+    if (targetDungeonNode.isBossLevel) {
+      console.log(`Dungeon node ${newFloorName} is a boss level, not generating children`);
+      return;
+    }
+    
+    console.log(`Generating children for dungeon node ${newFloorName}...`);
+    
+    // Calculate current depth for generation limits
+    const allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
+    const depthMap = this.calculateDepths(allNodes);
+    const currentDepth = depthMap[newFloorName] || 0;
+    const maxDepth = currentDepth + 6; // Allow generation up to 6 levels deeper
+    
+    // Generate children for this dungeon node
+    await this.generateDungeonChildren(targetDungeonNode);
+    
+    // Get the updated node with children
+    const updatedNode = await db.collection('dungeonDagNodes')
+      .findOne({ name: newFloorName }) as unknown as DungeonDagNode | null;
+    
+    if (updatedNode && updatedNode.children.length > 0) {
+      console.log(`✅ Generated ${updatedNode.children.length} children for dungeon node ${newFloorName}: ${updatedNode.children.join(', ')}`);
     }
   }
 
   /**
    * Generate children for a dungeon node using balanced exploration
    */
-  private async generateDungeonChildren(parentNode: DungeonDagNode): Promise<void> {
+  private async generateDungeonChildren(parentNode: DungeonDagNode, maxDepth?: number): Promise<void> {
     const db = getDatabase();
     const dungeonRandom = await this.createDungeonRandom();
+
+    // Calculate current depth and set reasonable max depth if not provided
+    const allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
+    const depthMap = this.calculateDepths(allNodes);
+    const currentDepth = depthMap[parentNode.name] || 0;
+    const effectiveMaxDepth = maxDepth || (currentDepth + 6);
+
+    console.log(`Generating children for ${parentNode.name} at depth ${currentDepth}, max depth ${effectiveMaxDepth}`);
 
     // Generate 2-5 downward stairs using seeded randomness
     const downStairCount = dungeonRandom.nextInt(2, 5);
@@ -261,7 +275,10 @@ export class DungeonService {
       };
       
       await db.collection('dungeonDagNodes').insertOne(childNode);
-      await this.generateFloor(childNode.name, false);
+      
+      // Generate the floor for this child, passing depth information
+      const childDepth = currentDepth + 1;
+      await this.generateFloor(childNode.name, false, childDepth, effectiveMaxDepth);
     }
 
     // Update parent with children
@@ -269,20 +286,6 @@ export class DungeonService {
       { name: parentNode.name },
       { $set: { children } }
     );
-  }
-
-  /**
-   * Recursively generate dungeon structure with balanced exploration
-   */
-  private async generateDungeonRecursive(
-    _nodeQueue: { node: DungeonDagNode; depth: number }[],
-    _maxDepth: number,
-    _generatedCount: { count: number },
-    _maxNodes: number
-  ): Promise<void> {
-    // The recursive generation is now handled within generateFloor -> placeDownwardStairsAndCreateChildren
-    // This method is kept for compatibility but the actual generation happens during floor creation
-    return;
   }
 
   /**
