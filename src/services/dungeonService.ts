@@ -227,8 +227,8 @@ export class DungeonService {
     const allNodes = await db.collection('dungeonDagNodes').find({}).limit(0).toArray() as unknown as DungeonDagNode[];
     const depthMap = this.calculateDepths(allNodes);
     const currentDepth = depthMap[newFloorName] || 0;
-    const maxDepth = currentDepth + 6; // Allow generation up to 6 levels deeper
-    
+    const maxDepth = currentDepth + 3; // Allow generation up to 3 levels deeper
+
     let generationPerformed = false;
     
     // Level 1: Generate children for the target node if it has none
@@ -295,11 +295,35 @@ export class DungeonService {
 
     console.log(`Generating children for ${parentNode.name} at depth ${currentDepth}, max depth ${effectiveMaxDepth}`);
 
+    // Get the parent floor nodes to place stairs
+    const parentFloorNodes = await db.collection('floorDagNodes')
+      .find({ dungeonDagNodeName: parentNode.name })
+      .toArray() as unknown as FloorDagNode[];
+
+    if (parentFloorNodes.length === 0) {
+      console.warn(`No floor nodes found for parent ${parentNode.name}, cannot place stairs`);
+      return;
+    }
+
     // Generate 2-5 downward stairs using seeded randomness
     const downStairCount = dungeonRandom.nextInt(2, 5);
     const children: string[] = [];
+    const parentRooms = parentFloorNodes.filter(node => node.isRoom);
     
-    for (let i = 0; i < downStairCount; i++) {
+    // Ensure we don't try to place more stairs than available rooms
+    const actualStairCount = Math.min(downStairCount, parentRooms.length);
+    const roomsToUpdate: FloorDagNode[] = [];
+    
+    for (let i = 0; i < actualStairCount; i++) {
+      // Find a room that doesn't already have a downward stair AND doesn't have an upward stair
+      const availableRooms = parentRooms.filter(r => !r.hasDownwardStair && !r.hasUpwardStair);
+      if (availableRooms.length === 0) {
+        console.log(`No more rooms available for downward stairs on floor ${parentNode.name}`);
+        break;
+      }
+      
+      const room = availableRooms[dungeonRandom.nextInt(0, availableRooms.length - 1)];
+      
       const childName = this.generateChildName(parentNode.name, children.length);
       children.push(childName);
       
@@ -308,21 +332,69 @@ export class DungeonService {
         children: [],
         isDownwardsFromParent: true,
         isBossLevel: dungeonRandom.nextBoolean(0.1), // 10% chance of boss level
+        parentFloorDagNodeName: room.name,
         visitedByUserIds: [] // Initialize empty array for tracking visitors
       };
       
       await db.collection('dungeonDagNodes').insertOne(childNode);
       
+      // Generate valid stair location that doesn't conflict with floor/wall tiles
+      const stairLocation = await this.generateValidStairLocation(room, parentNode.name);
+      if (!stairLocation) {
+        console.log(`Could not find valid stair location for room ${room.name}, using fallback position`);
+        // Use a fallback position in the center of the room
+        const fallbackX = Math.floor((room.roomWidth || 8) / 2);
+        const fallbackY = Math.floor((room.roomHeight || 8) / 2);
+        room.stairLocationX = fallbackX;
+        room.stairLocationY = fallbackY;
+      } else {
+        room.stairLocationX = stairLocation.x;
+        room.stairLocationY = stairLocation.y;
+      }
+      
+      // Set up the downward stair in the room
+      room.hasDownwardStair = true;
+      room.stairDungeonDagName = childName;
+      room.stairFloorDagName = `${childName}_A`; // Child floor's root room
+      
+      roomsToUpdate.push(room);
+      
+      console.log(`Creating downward stair in room ${room.name} at (${room.stairLocationX}, ${room.stairLocationY}) leading to dungeon ${childName}`);
+      
       // Generate the floor for this child, passing depth information
       const childDepth = currentDepth + 1;
-      await this.generateFloor(childNode.name, false, childDepth, effectiveMaxDepth);
+      await this.generateFloor(childNode.name, true, childDepth, effectiveMaxDepth); // true for hasUpwardStair
+    }
+
+    // Update the rooms in the database with stair information
+    for (const room of roomsToUpdate) {
+      await db.collection('floorDagNodes').updateOne(
+        { name: room.name },
+        { 
+          $set: { 
+            hasDownwardStair: room.hasDownwardStair,
+            stairLocationX: room.stairLocationX,
+            stairLocationY: room.stairLocationY,
+            stairDungeonDagName: room.stairDungeonDagName,
+            stairFloorDagName: room.stairFloorDagName
+          } 
+        }
+      );
+    }
+
+    // Validate and fix stair positions for the parent floor after adding new stairs
+    if (roomsToUpdate.length > 0) {
+      await this.validateAndFixStairPositions(parentNode.name, parentFloorNodes);
+      console.log(`✅ Validated stair positions for parent floor ${parentNode.name} after dynamic generation`);
     }
 
     // Update parent with children
-    await db.collection('dungeonDagNodes').updateOne(
-      { name: parentNode.name },
-      { $set: { children } }
-    );
+    if (children.length > 0) {
+      await db.collection('dungeonDagNodes').updateOne(
+        { name: parentNode.name },
+        { $set: { children } }
+      );
+    }
   }
 
   /**
