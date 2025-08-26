@@ -3,6 +3,7 @@ import { DungeonDagNode, FloorDagNode, FloorLayout, RoomStairs } from '../types/
 import { ServerFloorGenerator } from './floorGenerator';
 import { GeneratedFloorData, GeneratedFloorTileData, FloorTileCoordinates, ServerRoom } from '../types/floorGeneration';
 import { WallGenerator } from './wallGenerator';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * DungeonService manages the procedural generation of dungeon structures using two separate DAGs:
@@ -20,9 +21,33 @@ export class DungeonService {
 
   /**
    * Initialize the dungeon with the root floor and randomly generated levels
+   * @param seed Optional seed string for dungeon generation. If not provided, a unique UUID will be generated.
+   * @param reuseCurrentSeed If true, keeps the existing seed in the database. If false or undefined, updates the seed.
    */
-  async initializeDungeon(): Promise<void> {
+  async initializeDungeon(seed?: string, reuseCurrentSeed?: boolean): Promise<void> {
     const db = getDatabase();
+    
+    // Manage dungeon seed
+    if (!reuseCurrentSeed) {
+      const dungeonSeed = seed || uuidv4();
+      
+      // Clear existing seed data and insert new seed
+      await db.collection('dungeon_seed').deleteMany({});
+      await db.collection('dungeon_seed').insertOne({ seed: dungeonSeed });
+      
+      console.log(`Dungeon seed set to: ${dungeonSeed}`);
+    } else {
+      // Reuse current seed - check if one exists
+      const existingSeed = await db.collection('dungeon_seed').findOne({});
+      if (existingSeed) {
+        console.log(`Reusing existing dungeon seed: ${existingSeed.seed}`);
+      } else {
+        // No existing seed found, create a new one
+        const dungeonSeed = seed || uuidv4();
+        await db.collection('dungeon_seed').insertOne({ seed: dungeonSeed });
+        console.log(`No existing seed found, created new seed: ${dungeonSeed}`);
+      }
+    }
     
     // Clear existing dungeon data
     await db.collection('dungeonDagNodes').deleteMany({});
