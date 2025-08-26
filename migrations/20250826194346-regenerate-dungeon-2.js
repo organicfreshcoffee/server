@@ -1,3 +1,6 @@
+const { spawn } = require('child_process');
+const path = require('path');
+
 module.exports = {
   /**
    * @param db {import('mongodb').Db}
@@ -5,32 +8,31 @@ module.exports = {
    * @returns {Promise<void>}
    */
   async up(db, client) {
-    console.log('Regenerating dungeon with seed "initial"...');
+    console.log('Running dungeon regeneration with seed "initial"...');
     
-    try {
-      // Set up environment variables for the database connection
-      process.env.MONGODB_DB_NAME = db.databaseName;
-      
-      // Import and set up database connection
-      const { connectToDatabase, closeDatabase } = await import('../src/config/database.js');
-      await connectToDatabase();
-      
-      // Import DungeonService
-      const { DungeonService } = await import('../src/services/dungeonService.js');
-      
-      // Initialize dungeon with the seed "initial"
-      const dungeonService = new DungeonService();
-      await dungeonService.initializeDungeon("initial");
-      
-      console.log('✅ Dungeon regenerated successfully with seed "initial"');
-      
-      // Close the database connection to ensure clean state
-      await closeDatabase();
-      
-    } catch (error) {
-      console.error('❌ Failed to regenerate dungeon:', error);
-      throw error;
-    }
+    return new Promise((resolve, reject) => {
+      // Run the TypeScript script using ts-node with seed "initial"
+      const scriptPath = path.join(__dirname, '..', 'scripts', 'regenerate-dungeon.ts');
+      const child = spawn('npx', ['ts-node', scriptPath, '--seed', 'initial'], {
+        stdio: 'inherit', // This will show the script output in the migration console
+        cwd: path.join(__dirname, '..'), // Set working directory to project root
+      });
+
+      child.on('close', (code) => {
+        if (code === 0) {
+          console.log('✅ Dungeon regeneration with seed "initial" completed successfully!');
+          resolve();
+        } else {
+          console.error(`❌ Dungeon regeneration script failed with exit code ${code}`);
+          reject(new Error(`Migration script failed with exit code ${code}`));
+        }
+      });
+
+      child.on('error', (error) => {
+        console.error('❌ Failed to start dungeon regeneration script:', error);
+        reject(error);
+      });
+    });
   },
 
   /**
