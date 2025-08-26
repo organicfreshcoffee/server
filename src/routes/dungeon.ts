@@ -95,13 +95,9 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
       });
       return;
     }
-
-    // In a real implementation, you'd get all player levels from the database
-    // For now, we'll assume this single player's floor
-    const playerLevels = [newFloorName];
     
     // Trigger procedural generation if needed
-    await dungeonService.checkAndGenerateFloors(newFloorName, playerLevels);
+    await dungeonService.checkAndGenerateFloors(newFloorName);
 
     // Mark the dungeon node as visited by this user
     await dungeonService.markDungeonNodeVisited(newFloorName, userId);
