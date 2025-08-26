@@ -1,7 +1,7 @@
 import { getDatabase } from '../config/database';
 import { DungeonDagNode, FloorDagNode, FloorLayout, RoomStairs } from '../types/game';
 import { ServerFloorGenerator } from './floorGenerator';
-import { GeneratedFloorData, GeneratedFloorTileData, FloorTileCoordinates } from '../types/floorGeneration';
+import { GeneratedFloorData, GeneratedFloorTileData, FloorTileCoordinates, ServerRoom } from '../types/floorGeneration';
 import { WallGenerator } from './wallGenerator';
 
 /**
@@ -459,18 +459,27 @@ export class DungeonService {
    */
   private async validateAndFixStairPositions(dungeonNodeName: string, floorNodes: FloorDagNode[]): Promise<void> {
     const db = getDatabase();
-    const roomsWithStairs = floorNodes.filter(node => 
-      node.isRoom && (node.hasUpwardStair || node.hasDownwardStair)
-    );
-
-    if (roomsWithStairs.length === 0) {
-      return;
-    }
 
     // Get the generated floor tile data to check for conflicts
     const generatedFloorData = await this.getGeneratedFloorTileData(dungeonNodeName);
     if (!generatedFloorData) {
       console.warn(`Could not get tile data for ${dungeonNodeName}, skipping stair validation`);
+      return;
+    }
+
+    // Get the generated floor data to access positioned rooms
+    const generatedData = await this.getGeneratedFloorData(dungeonNodeName);
+    if (!generatedData) {
+      console.warn(`Could not get generated floor data for ${dungeonNodeName}, skipping stair validation`);
+      return;
+    }
+
+    // Filter rooms that have stairs
+    const roomsWithStairs = generatedData.rooms.filter(room => 
+      room.hasUpwardStair || room.hasDownwardStair
+    );
+
+    if (roomsWithStairs.length === 0) {
       return;
     }
 
@@ -493,18 +502,31 @@ export class DungeonService {
         continue;
       }
 
-      const currentStairKey = `${room.stairLocationX},${room.stairLocationY}`;
+      // Convert local room coordinates to global coordinates
+      const globalStairX = room.position.x + room.stairLocationX;
+      const globalStairY = room.position.y + room.stairLocationY;
+      const currentStairKey = `${globalStairX},${globalStairY}`;
       
       // Check if current stair position conflicts with floor or wall tiles
       if (floorTilePositions.has(currentStairKey) || wallTilePositions.has(currentStairKey)) {
-        console.log(`Stair position conflict detected for room ${room.name} at (${room.stairLocationX}, ${room.stairLocationY}), finding new position...`);
+        console.log(`Stair position conflict detected for room ${room.name} at global position (${globalStairX}, ${globalStairY}), finding new position...`);
+        
+        // Find the corresponding FloorDagNode for database update
+        const floorDagNode = floorNodes.find(node => node.name === room.name);
+        if (!floorDagNode) {
+          console.warn(`Could not find FloorDagNode for room ${room.name}`);
+          continue;
+        }
         
         // Find a new valid position
         const newPosition = await this.findValidStairPositionForRoom(room, floorTilePositions, wallTilePositions);
         if (newPosition) {
+          // Update both the ServerRoom (for current processing) and FloorDagNode (for database)
           room.stairLocationX = newPosition.x;
           room.stairLocationY = newPosition.y;
-          roomsToUpdate.push(room);
+          floorDagNode.stairLocationX = newPosition.x;
+          floorDagNode.stairLocationY = newPosition.y;
+          roomsToUpdate.push(floorDagNode);
           console.log(`Moved stair for room ${room.name} to new position (${newPosition.x}, ${newPosition.y})`);
         } else {
           console.warn(`Could not find valid stair position for room ${room.name}, keeping current position`);
@@ -534,34 +556,40 @@ export class DungeonService {
    * Find a valid stair position within a room that doesn't conflict with tiles
    */
   private async findValidStairPositionForRoom(
-    room: FloorDagNode, 
+    room: ServerRoom, 
     floorTilePositions: Set<string>, 
     wallTilePositions: Set<string>
   ): Promise<{ x: number; y: number } | null> {
-    if (!room.roomWidth || !room.roomHeight) {
+    if (!room.width || !room.height) {
       return null;
     }
 
     // Try to find a valid position within the room bounds
     const maxAttempts = 50;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const x = Math.floor(Math.random() * room.roomWidth);
-      const y = Math.floor(Math.random() * room.roomHeight);
-      const positionKey = `${x},${y}`;
+      const localX = Math.floor(Math.random() * room.width);
+      const localY = Math.floor(Math.random() * room.height);
+      
+      // Convert to global coordinates for checking
+      const globalX = room.position.x + localX;
+      const globalY = room.position.y + localY;
+      const positionKey = `${globalX},${globalY}`;
       
       // Check if this position conflicts with existing tiles
       if (!floorTilePositions.has(positionKey) && !wallTilePositions.has(positionKey)) {
-        return { x, y };
+        return { x: localX, y: localY }; // Return local coordinates for storage
       }
     }
 
     // If we couldn't find a valid position, try the center of the room
-    const centerX = Math.floor(room.roomWidth / 2);
-    const centerY = Math.floor(room.roomHeight / 2);
-    const centerKey = `${centerX},${centerY}`;
+    const centerX = Math.floor(room.width / 2);
+    const centerY = Math.floor(room.height / 2);
+    const globalCenterX = room.position.x + centerX;
+    const globalCenterY = room.position.y + centerY;
+    const centerKey = `${globalCenterX},${globalCenterY}`;
     
     if (!floorTilePositions.has(centerKey) && !wallTilePositions.has(centerKey)) {
-      return { x: centerX, y: centerY };
+      return { x: centerX, y: centerY }; // Return local coordinates for storage
     }
 
     return null;
