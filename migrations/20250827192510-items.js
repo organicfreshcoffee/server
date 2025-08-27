@@ -35,6 +35,133 @@ module.exports = {
     await itemInstancesCollection.createIndex({ make: 1 });
     
     console.log('Item collections and indexes created successfully');
+    
+    // Insert item templates
+    console.log('Inserting item templates...');
+    
+    const itemTemplates = [
+      // Ring
+      {
+        category: 'Ring',
+        name: 'Ring',
+        possibleMaterials: ['Copper', 'Bronze', 'Silver', 'Gold', 'Platinum', 'Jade']
+      },
+      
+      // Amulet
+      {
+        category: 'Amulet',
+        name: 'Amulet',
+        possibleMaterials: ['Copper', 'Bronze', 'Silver', 'Gold', 'Platinum', 'Jade']
+      },
+      
+      // Chest armor
+      {
+        category: 'Chest armor',
+        name: 'Chain mail',
+        possibleMaterials: ['Copper', 'Bronze', 'Iron', 'Steel', 'Mythril']
+      },
+      {
+        category: 'Chest armor',
+        name: 'Plate mail',
+        possibleMaterials: ['Copper', 'Bronze', 'Iron', 'Steel', 'Mythril']
+      },
+      {
+        category: 'Chest armor',
+        name: 'Shirt',
+        possibleMaterials: ['Cloth', 'Leather']
+      },
+      
+      // Head armor
+      {
+        category: 'Head armor',
+        name: 'Helm',
+        possibleMaterials: ['Wood', 'Copper', 'Bronze', 'Iron', 'Steel', 'Mythril']
+      },
+      {
+        category: 'Head armor',
+        name: 'Cap',
+        possibleMaterials: ['Cloth', 'Leather']
+      },
+      
+      // Cloak
+      {
+        category: 'Cloak',
+        name: 'Cloak',
+        possibleMaterials: ['Cloth', 'Leather']
+      },
+      
+      // Leg armor
+      {
+        category: 'Leg armor',
+        name: 'Leggings',
+        possibleMaterials: ['Wood', 'Copper', 'Bronze', 'Iron', 'Steel', 'Mythril', 'Cloth', 'Leather']
+      },
+      
+      // Shoes
+      {
+        category: 'Shoes',
+        name: 'Boots',
+        possibleMaterials: ['Wood', 'Copper', 'Bronze', 'Iron', 'Steel', 'Mythril', 'Cloth', 'Leather']
+      },
+      
+      // Gloves
+      {
+        category: 'Gloves',
+        name: 'Gauntlets',
+        possibleMaterials: ['Copper', 'Bronze', 'Iron', 'Steel', 'Mythril']
+      },
+      {
+        category: 'Gloves',
+        name: 'Gloves',
+        possibleMaterials: ['Cloth', 'Leather']
+      },
+      
+      // Shield
+      {
+        category: 'Shield',
+        name: 'Round shield',
+        possibleMaterials: ['Wood', 'Copper', 'Bronze', 'Iron', 'Steel', 'Mythril']
+      },
+      {
+        category: 'Shield',
+        name: 'Large shield',
+        possibleMaterials: ['Wood', 'Copper', 'Bronze', 'Iron', 'Steel', 'Mythril']
+      },
+      
+      // Range Weapon
+      {
+        category: 'Range Weapon',
+        name: 'Bow',
+        possibleMaterials: ['Wood']
+      },
+      {
+        category: 'Range Weapon',
+        name: 'Crossbow',
+        possibleMaterials: ['Wood']
+      },
+      
+      // Melee Weapon
+      {
+        category: 'Melee Weapon',
+        name: 'Axe',
+        possibleMaterials: ['Wood', 'Copper', 'Bronze', 'Iron', 'Steel', 'Mythril']
+      },
+      {
+        category: 'Melee Weapon',
+        name: 'Short Sword',
+        possibleMaterials: ['Wood', 'Copper', 'Bronze', 'Iron', 'Steel', 'Mythril']
+      },
+      
+      // Magic Weapon
+      {
+        category: 'Magic Weapon',
+        name: 'Staff',
+        possibleMaterials: ['Wood']
+      }
+    ];
+    
+    await itemTemplatesCollection.insertMany(itemTemplates);
+    console.log(`Inserted ${itemTemplates.length} item templates`);
   },
 
   /**
