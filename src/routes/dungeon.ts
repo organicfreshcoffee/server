@@ -527,6 +527,34 @@ router.post('/pickup-item', async (req: AuthenticatedRequest, res): Promise<void
       const db = getDatabase();
       const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
 
+      // Broadcast pickup event to other players on the floor
+      if (updatedItem) {
+        const { broadcastToFloorExcluding } = await import('../services/floorManager');
+        const { clients } = await import('../services/websocket');
+        
+        // Get player's current floor
+        const player = await playerService.getPlayer(userId);
+        const currentFloor = player?.currentDungeonDagNodeName || 'A';
+        
+        // Find the client ID for this user (to exclude them from the broadcast)
+        let clientId = '';
+        for (const [id, client] of clients.entries()) {
+          if (client.userId === userId) {
+            clientId = id;
+            break;
+          }
+        }
+        
+        broadcastToFloorExcluding(currentFloor, clientId, {
+          type: 'item-picked-up',
+          data: {
+            itemId: itemId,
+            playerId: userId,
+            floor: currentFloor
+          }
+        }, clients);
+      }
+
       res.json({
         success: true,
         message: 'Item picked up successfully',
