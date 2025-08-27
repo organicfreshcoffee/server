@@ -33,6 +33,7 @@ module.exports = {
     await itemInstancesCollection.createIndex({ spawnDatetime: 1 });
     await itemInstancesCollection.createIndex({ material: 1 });
     await itemInstancesCollection.createIndex({ make: 1 });
+    await itemInstancesCollection.createIndex({ floor: 1 });
     
     console.log('Item collections and indexes created successfully');
     

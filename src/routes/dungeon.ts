@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { dungeonService, playerService, enemyService } from '../services';
+import { dungeonService, playerService, enemyService, itemService } from '../services';
 import { changePlayerFloor, getTotalPlayerCount, getPlayerCountsByFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 
@@ -103,6 +103,8 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
     await dungeonService.markDungeonNodeVisited(newFloorName, userId);
     console.log(`Marked dungeon node ${newFloorName} as visited by user ${userId}`);
 
+    const tileData = await dungeonService.getGeneratedFloorTileData(newFloorName);
+
     // Check for enemies on the new floor and spawn them if needed (non-blocking)
     setImmediate(async () => {
       try {
@@ -110,9 +112,6 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
         
         if (!hasEnemies) {
           console.log(`No enemies found on floor ${newFloorName}, spawning new enemies...`);
-          
-          // Get floor tile data for enemy positioning
-          const tileData = await dungeonService.getGeneratedFloorTileData(newFloorName);
           
           if (tileData && tileData.tiles.floorTiles.length > 0) {
             // Extract just the position data for enemy spawning
@@ -132,6 +131,35 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
         }
       } catch (error) {
         console.error(`Error spawning enemies on floor ${newFloorName}:`, error);
+      }
+    });
+
+    // Check for items on the new floor and spawn them if needed (non-blocking)
+    setImmediate(async () => {
+      try {
+        const hasItems = await itemService.hasItemsOnFloor(newFloorName);
+        
+        if (!hasItems) {
+          console.log(`No items found on floor ${newFloorName}, spawning new items...`);
+          
+          if (tileData && tileData.tiles.floorTiles.length > 0) {
+            // Extract just the position data for item spawning
+            const floorTilePositions = tileData.tiles.floorTiles.map(tile => ({
+              x: tile.x,
+              y: tile.y
+            }));
+            
+            // Spawn 5 items on random floor tiles - each item gets its own independent thread
+            await itemService.spawnItemsOnFloor(newFloorName, floorTilePositions);
+            console.log(`Successfully spawned 5 independent item threads on floor ${newFloorName}`);
+          } else {
+            console.warn(`No floor tiles found for floor ${newFloorName}, cannot spawn items`);
+          }
+        } else {
+          console.log(`Items already exist on floor ${newFloorName}, skipping spawn`);
+        }
+      } catch (error) {
+        console.error(`Error spawning items on floor ${newFloorName}:`, error);
       }
     });
 
