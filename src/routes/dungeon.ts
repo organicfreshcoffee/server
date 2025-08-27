@@ -447,4 +447,104 @@ router.get('/visited-nodes', async (req: AuthenticatedRequest, res): Promise<voi
   }
 });
 
+/**
+ * Get items on current floor
+ * GET /api/dungeon/floor-items
+ */
+router.get('/floor-items', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    // Get player's current floor
+    const player = await playerService.getPlayer(userId);
+    if (!player) {
+      res.status(404).json({
+        success: false,
+        error: 'Player not found'
+      });
+      return;
+    }
+
+    // Get items on the player's current floor
+    const currentFloor = player.currentDungeonDagNodeName || 'A'; // Default to root floor
+    const items = await itemService.getItemsOnFloor(currentFloor);
+
+    res.json({
+      success: true,
+      data: {
+        floor: currentFloor,
+        items: items
+      }
+    });
+  } catch (error) {
+    console.error('Error in floor-items:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Pick up an item
+ * POST /api/dungeon/pickup-item
+ */
+router.post('/pickup-item', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    const { itemId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    if (!itemId) {
+      res.status(400).json({
+        success: false,
+        error: 'Item ID is required'
+      });
+      return;
+    }
+
+    // Try to pick up the item
+    const success = await itemService.pickupItem(itemId, userId);
+
+    if (success) {
+      // Get the updated item data to send back
+      const { getDatabase } = await import('../config/database');
+      const db = getDatabase();
+      const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
+
+      res.json({
+        success: true,
+        message: 'Item picked up successfully',
+        item: updatedItem
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'Item could not be picked up (may already be taken or not exist)'
+      });
+    }
+  } catch (error) {
+    console.error('Error in pickup-item:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
 export default router;
