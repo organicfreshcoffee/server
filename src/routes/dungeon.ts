@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { dungeonService, playerService, enemyService } from '../services';
+import { dungeonService, playerService, enemyService, itemService } from '../services';
 import { changePlayerFloor, getTotalPlayerCount, getPlayerCountsByFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 
@@ -103,6 +103,8 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
     await dungeonService.markDungeonNodeVisited(newFloorName, userId);
     console.log(`Marked dungeon node ${newFloorName} as visited by user ${userId}`);
 
+    const tileData = await dungeonService.getGeneratedFloorTileData(newFloorName);
+
     // Check for enemies on the new floor and spawn them if needed (non-blocking)
     setImmediate(async () => {
       try {
@@ -110,9 +112,6 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
         
         if (!hasEnemies) {
           console.log(`No enemies found on floor ${newFloorName}, spawning new enemies...`);
-          
-          // Get floor tile data for enemy positioning
-          const tileData = await dungeonService.getGeneratedFloorTileData(newFloorName);
           
           if (tileData && tileData.tiles.floorTiles.length > 0) {
             // Extract just the position data for enemy spawning
@@ -132,6 +131,35 @@ router.post('/player-moved-floor', async (req: AuthenticatedRequest, res): Promi
         }
       } catch (error) {
         console.error(`Error spawning enemies on floor ${newFloorName}:`, error);
+      }
+    });
+
+    // Check for items on the new floor and spawn them if needed (non-blocking)
+    setImmediate(async () => {
+      try {
+        const hasItems = await itemService.hasItemsOnFloor(newFloorName);
+        
+        if (!hasItems) {
+          console.log(`No items found on floor ${newFloorName}, spawning new items...`);
+          
+          if (tileData && tileData.tiles.floorTiles.length > 0) {
+            // Extract just the position data for item spawning
+            const floorTilePositions = tileData.tiles.floorTiles.map(tile => ({
+              x: tile.x,
+              y: tile.y
+            }));
+            
+            // Spawn 5 items on random floor tiles - each item gets its own independent thread
+            await itemService.spawnItemsOnFloor(newFloorName, floorTilePositions);
+            console.log(`Successfully spawned 5 independent item threads on floor ${newFloorName}`);
+          } else {
+            console.warn(`No floor tiles found for floor ${newFloorName}, cannot spawn items`);
+          }
+        } else {
+          console.log(`Items already exist on floor ${newFloorName}, skipping spawn`);
+        }
+      } catch (error) {
+        console.error(`Error spawning items on floor ${newFloorName}:`, error);
       }
     });
 
@@ -412,6 +440,106 @@ router.get('/visited-nodes', async (req: AuthenticatedRequest, res): Promise<voi
     });
   } catch (error) {
     console.error('Error in get-visited-nodes:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Get items on current floor
+ * GET /api/dungeon/floor-items
+ */
+router.get('/floor-items', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    // Get player's current floor
+    const player = await playerService.getPlayer(userId);
+    if (!player) {
+      res.status(404).json({
+        success: false,
+        error: 'Player not found'
+      });
+      return;
+    }
+
+    // Get items on the player's current floor
+    const currentFloor = player.currentDungeonDagNodeName || 'A'; // Default to root floor
+    const items = await itemService.getItemsOnFloor(currentFloor);
+
+    res.json({
+      success: true,
+      data: {
+        floor: currentFloor,
+        items: items
+      }
+    });
+  } catch (error) {
+    console.error('Error in floor-items:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Pick up an item
+ * POST /api/dungeon/pickup-item
+ */
+router.post('/pickup-item', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    const { itemId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    if (!itemId) {
+      res.status(400).json({
+        success: false,
+        error: 'Item ID is required'
+      });
+      return;
+    }
+
+    // Try to pick up the item
+    const success = await itemService.pickupItem(itemId, userId);
+
+    if (success) {
+      // Get the updated item data to send back
+      const { getDatabase } = await import('../config/database');
+      const db = getDatabase();
+      const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
+
+      res.json({
+        success: true,
+        message: 'Item picked up successfully',
+        item: updatedItem
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'Item could not be picked up (may already be taken or not exist)'
+      });
+    }
+  } catch (error) {
+    console.error('Error in pickup-item:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'
