@@ -494,6 +494,100 @@ router.get('/floor-items', async (req: AuthenticatedRequest, res): Promise<void>
 });
 
 /**
+ * Get player's inventory (items owned by the requesting user)
+ * GET /api/dungeon/inventory
+ */
+router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    // Get items owned by the player
+    const { getDatabase } = await import('../config/database');
+    const db = getDatabase();
+    
+    const inventoryItems = await db.collection('itemInstances')
+      .find({ 
+        owner: userId,
+        inWorld: false
+      })
+      .toArray();
+
+    // Calculate inventory statistics
+    const totalItems = inventoryItems.length;
+    const totalValue = inventoryItems.reduce((sum, item) => sum + (item.value || 0), 0);
+    const totalWeight = inventoryItems.reduce((sum, item) => sum + (item.weight || 0), 0);
+
+    // Group items by category for easier display
+    const itemsByCategory: Record<string, any[]> = {};
+    for (const item of inventoryItems) {
+      // Get the item template to find category
+      const template = await db.collection('itemTemplates').findOne({ _id: item.itemTemplateId });
+      const category = template?.category || 'Unknown';
+      
+      if (!itemsByCategory[category]) {
+        itemsByCategory[category] = [];
+      }
+      itemsByCategory[category].push({
+        id: item.id,
+        itemTemplateId: item.itemTemplateId,
+        material: item.material,
+        make: item.make,
+        alignment: item.alignment,
+        enchantments: item.enchantments,
+        value: item.value,
+        name: item.name,
+        weight: item.weight,
+        weaponStats: item.weaponStats,
+        armorStats: item.armorStats,
+        spawnDatetime: item.spawnDatetime
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        inventory: {
+          items: inventoryItems.map(item => ({
+            id: item.id,
+            itemTemplateId: item.itemTemplateId,
+            material: item.material,
+            make: item.make,
+            alignment: item.alignment,
+            enchantments: item.enchantments,
+            value: item.value,
+            name: item.name,
+            weight: item.weight,
+            weaponStats: item.weaponStats,
+            armorStats: item.armorStats,
+            spawnDatetime: item.spawnDatetime
+          })),
+          itemsByCategory,
+          statistics: {
+            totalItems,
+            totalValue,
+            totalWeight: Math.round(totalWeight * 10) / 10 // Round to 1 decimal
+          }
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error in inventory:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
  * Pick up an item
  * POST /api/dungeon/pickup-item
  */
