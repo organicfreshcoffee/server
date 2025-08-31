@@ -339,6 +339,17 @@ export class ItemService {
   async pickupItem(itemId: string, playerId: string): Promise<boolean> {
     const db = getDatabase();
     
+    // First, get the item to know which floor it's on for the broadcast
+    const existingItem = await db.collection('itemInstances').findOne({ 
+      id: itemId, 
+      owner: null, 
+      inWorld: true 
+    });
+    
+    if (!existingItem) {
+      return false; // Item doesn't exist or already picked up
+    }
+    
     const result = await db.collection('itemInstances').updateOne(
       { id: itemId, owner: null, inWorld: true },
       { 
@@ -355,6 +366,15 @@ export class ItemService {
       if (itemInstance) {
         itemInstance.stopTimer();
       }
+      
+      // Send item-despawned message to all players on the floor
+      broadcastToFloor(existingItem.floor, {
+        type: 'item-despawned',
+        data: {
+          itemId: itemId,
+          floor: existingItem.floor
+        }
+      }, clients);
       
       console.log(`Item ${itemId} picked up by player ${playerId}`);
       return true;
