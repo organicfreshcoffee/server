@@ -526,7 +526,30 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
     const totalWeight = inventoryItems.reduce((sum, item) => sum + (item.weight || 0), 0);
 
     // Group items by category for easier display
-    const itemsByCategory: Record<string, any[]> = {};
+    interface InventoryItem {
+      id: string;
+      itemTemplateId: string;
+      material: string;
+      make: string;
+      alignment: number;
+      enchantments: string[];
+      value: number;
+      name: string;
+      weight: number;
+      weaponStats?: {
+        type: string;
+        powerMultiplier: number;
+        dexterityMultiplier: number;
+      };
+      armorStats?: {
+        defenseMultiplier: number;
+        speedMultiplier: number;
+        manaMultiplier: number;
+      };
+      spawnDatetime: Date;
+    }
+
+    const itemsByCategory: Record<string, InventoryItem[]> = {};
     for (const item of inventoryItems) {
       // Get the item template to find category
       const template = await db.collection('itemTemplates').findOne({ _id: item.itemTemplateId });
