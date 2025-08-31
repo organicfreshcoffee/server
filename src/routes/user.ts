@@ -3,6 +3,7 @@ import { PlayerService } from '../services/playerService';
 import { AuthService } from '../services/authService';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { Player } from '../types/game';
+import { getDatabase } from '../config/database';
 
 const router = Router();
 const playerService = new PlayerService();
@@ -78,7 +79,14 @@ router.delete('/delete-data', async (req: Request, res: Response): Promise<void>
     // Delete the player data
     await playerService.deletePlayer(playerToDelete.userId);
 
+    // Delete items owned by the player
+    const db = getDatabase();
+    const itemsDeleteResult = await db.collection('itemInstances').deleteMany({ 
+      owner: playerToDelete.userId 
+    });
+
     console.log(`Successfully deleted player data for ${playerToDelete.username} (userId: ${playerToDelete.userId})`);
+    console.log(`Deleted ${itemsDeleteResult.deletedCount} items owned by the player`);
 
     res.json({
       success: true,
@@ -88,7 +96,8 @@ router.delete('/delete-data', async (req: Request, res: Response): Promise<void>
           username: playerToDelete.username,
           email: playerToDelete.email,
           deletedAt: new Date().toISOString()
-        }
+        },
+        deletedItems: itemsDeleteResult.deletedCount
       }
     });
 
@@ -129,6 +138,18 @@ router.get('/export-data', authenticateToken, async (req: AuthenticatedRequest, 
       return;
     }
 
+    // Get items owned by the player
+    const db = getDatabase();
+    const playerItems = await db.collection('itemInstances')
+      .find({ owner: userId })
+      .toArray();
+
+    // Convert MongoDB ObjectIds to strings for JSON serialization
+    const serializedItems = playerItems.map(item => ({
+      ...item,
+      _id: item._id.toString()
+    }));
+
     // Return all player data for export
     res.json({
       success: true,
@@ -151,11 +172,13 @@ router.get('/export-data', authenticateToken, async (req: AuthenticatedRequest, 
           isOnline: player.isOnline,
           isAlive: player.isAlive,
           currentDungeonDagNodeName: player.currentDungeonDagNodeName
-        }
+        },
+        items: serializedItems,
+        itemCount: serializedItems.length
       }
     });
 
-    console.log(`Data export completed for user: ${userId}`);
+    console.log(`Data export completed for user: ${userId} (${serializedItems.length} items included)`);
 
   } catch (error) {
     console.error('Error in export-data:', error);
