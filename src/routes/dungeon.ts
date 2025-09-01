@@ -529,6 +529,9 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
     interface InventoryItem {
       id: string;
       itemTemplateId: string;
+      category: string;
+      templateName: string;
+      possibleMaterials: string[];
       material: string;
       make: string;
       alignment: number;
@@ -551,9 +554,8 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
 
     const itemsByCategory: Record<string, InventoryItem[]> = {};
     for (const item of inventoryItems) {
-      // Get the item template to find category
-      const template = await db.collection('itemTemplates').findOne({ _id: item.itemTemplateId });
-      const category = template?.category || 'Unknown';
+      // Use the category from the item instance (no need to fetch template)
+      const category = item.category || 'Unknown';
       
       if (!itemsByCategory[category]) {
         itemsByCategory[category] = [];
@@ -561,6 +563,9 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
       itemsByCategory[category].push({
         id: item.id,
         itemTemplateId: item.itemTemplateId,
+        category: item.category,
+        templateName: item.templateName,
+        possibleMaterials: item.possibleMaterials,
         material: item.material,
         make: item.make,
         alignment: item.alignment,
@@ -581,6 +586,9 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
           items: inventoryItems.map(item => ({
             id: item.id,
             itemTemplateId: item.itemTemplateId,
+            category: item.category,
+            templateName: item.templateName,
+            possibleMaterials: item.possibleMaterials,
             material: item.material,
             make: item.make,
             alignment: item.alignment,

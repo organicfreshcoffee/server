@@ -5,6 +5,9 @@ import { clients } from './websocket';
 export interface ItemInstanceData {
   id: string;
   itemTemplateId: string;
+  category: string;
+  templateName: string;
+  possibleMaterials: string[];
   material: string;
   make: string;
   location: { x: number; y: number };

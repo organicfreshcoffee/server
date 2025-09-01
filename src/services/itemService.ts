@@ -267,6 +267,9 @@ export class ItemService {
     const itemData: ItemInstanceData = {
       id: uuidv4(),
       itemTemplateId: template._id!,
+      category: template.category,
+      templateName: template.name,
+      possibleMaterials: template.possibleMaterials,
       material,
       make,
       location: { x: worldX, y: worldY },
@@ -404,6 +407,9 @@ export class ItemService {
     return items.map(item => ({
       id: item.id,
       itemTemplateId: item.itemTemplateId,
+      category: item.category,
+      templateName: item.templateName,
+      possibleMaterials: item.possibleMaterials,
       material: item.material,
       make: item.make,
       location: item.location,
