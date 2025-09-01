@@ -4,6 +4,7 @@ import { ServerFloorGenerator } from './floorGenerator';
 import { GeneratedFloorData, GeneratedFloorTileData, FloorTileCoordinates, ServerRoom } from '../types/floorGeneration';
 import { WallGenerator } from './wallGenerator';
 import { v4 as uuidv4 } from 'uuid';
+import { traceDbOperation, traceGameOperation, addSpanAttributes, addSpanEvent } from '../config/tracing';
 
 /**
  * Seeded random number generator using a simple LCG (Linear Congruential Generator)
@@ -108,15 +109,30 @@ export class DungeonService {
    * @param reuseCurrentSeed If true, keeps the existing seed in the database. If false or undefined, updates the seed.
    */
   async initializeDungeon(seed?: string, reuseCurrentSeed?: boolean): Promise<void> {
-    const db = getDatabase();
-    
-    // Manage dungeon seed
-    if (!reuseCurrentSeed) {
-      const dungeonSeed = seed || uuidv4();
+    return traceGameOperation('initialize_dungeon', async () => {
+      const db = getDatabase();
       
-      // Clear existing seed data and insert new seed
-      await db.collection('dungeon_seed').deleteMany({});
-      await db.collection('dungeon_seed').insertOne({ seed: dungeonSeed });
+      addSpanAttributes({
+        'dungeon.seed.provided': !!seed,
+        'dungeon.seed.reuse': !!reuseCurrentSeed,
+      });
+      
+      // Manage dungeon seed
+      if (!reuseCurrentSeed) {
+        const dungeonSeed = seed || uuidv4();
+        
+        addSpanAttributes({
+          'dungeon.seed.value': dungeonSeed,
+        });
+        
+        // Clear existing seed data and insert new seed
+        await traceDbOperation('deleteMany', 'dungeon_seed', async () => {
+          return db.collection('dungeon_seed').deleteMany({});
+        });
+        
+        await traceDbOperation('insertOne', 'dungeon_seed', async () => {
+          return db.collection('dungeon_seed').insertOne({ seed: dungeonSeed });
+        });
       
       // Clear cached seed so it gets reloaded
       this.dungeonSeed = null;
@@ -202,6 +218,13 @@ export class DungeonService {
 
     // eslint-disable-next-line no-console
     console.log('Dungeon initialized with root floor A');
+    
+    addSpanEvent('dungeon.initialized', {
+      'dungeon.floors.created': 1,
+      'dungeon.players.respawned': 'completed',
+    });
+    
+    }, { 'dungeon.operation': 'initialize' });
   }
 
   /**

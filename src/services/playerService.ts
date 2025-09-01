@@ -1,34 +1,49 @@
 import { getDatabase } from '../config/database';
 import { Player, Position } from '../types/game';
+import { traceDbOperation, traceGameOperation, addSpanAttributes } from '../config/tracing';
 
 export class PlayerService {
   private readonly collection = 'players';
 
   async createPlayer(userId: string, username: string, email?: string): Promise<Player> {
-    const db = getDatabase();
-    
-    const player: Omit<Player, 'id'> = {
-      userId,
-      username,
-      email,
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0 },
-      health: 100,
-      maxHealth: 100,
-      level: 1,
-      experience: 0,
-      lastUpdate: new Date(),
-      isOnline: false,
-      isAlive: true,
-      currentDungeonDagNodeName: 'A', // Default to root floor
-    };
+    return traceGameOperation('create_player', async () => {
+      const db = getDatabase();
+      
+      addSpanAttributes({
+        'player.user_id': userId,
+        'player.username': username,
+        'player.email.provided': !!email,
+      });
+      
+      const player: Omit<Player, 'id'> = {
+        userId,
+        username,
+        email,
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        health: 100,
+        maxHealth: 100,
+        level: 1,
+        experience: 0,
+        lastUpdate: new Date(),
+        isOnline: false,
+        isAlive: true,
+        currentDungeonDagNodeName: 'A', // Default to root floor
+      };
 
-    const result = await db.collection(this.collection).insertOne(player);
-    
-    return {
-      id: result.insertedId.toString(),
-      ...player,
-    };
+      const result = await traceDbOperation('insertOne', 'players', async () => {
+        return db.collection(this.collection).insertOne(player);
+      });
+      
+      addSpanAttributes({
+        'player.id': result.insertedId.toString(),
+      });
+      
+      return {
+        id: result.insertedId.toString(),
+        ...player,
+      };
+    }, { 'player.operation': 'create' });
   }
 
   async getPlayer(userId: string): Promise<Player | null> {
