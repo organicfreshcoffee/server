@@ -3,9 +3,9 @@ import { trace as otelTrace, SpanStatusCode, SpanKind } from '@opentelemetry/api
 
 // Initialize Google Cloud Trace
 export function initializeTracing(): void {
-  const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
+  // Check for GCP project ID in different environments
+  const projectId = process.env.GCP_PROJECT_ID || process.env.GCP_PROJECT_ID_STAGING;
   
-  // Only initialize GCP tracing if project ID is provided
   if (projectId) {
     try {
       // Start the trace agent - this should be done as early as possible
@@ -31,7 +31,7 @@ export function initializeTracing(): void {
     }
   } else {
     // eslint-disable-next-line no-console
-    console.log('GOOGLE_CLOUD_PROJECT_ID not set - running in local development mode without GCP tracing');
+    console.log('GCP_PROJECT_ID or GCP_PROJECT_ID_STAGING not set - running in local development mode without GCP tracing');
   }
 }
 

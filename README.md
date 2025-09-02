@@ -48,7 +48,9 @@ CLIENT_URL=http://localhost:3000
 MONGODB_URI=mongodb://admin:password@localhost:27018/gamedb?authSource=admin
 
 # Google Cloud Tracing Configuration (optional)
-GOOGLE_CLOUD_PROJECT_ID=your-gcp-project-id
+# Use GCP_PROJECT_ID for production, GCP_PROJECT_ID_STAGING for staging
+# GCP_PROJECT_ID=your-production-gcp-project-id
+# GCP_PROJECT_ID_STAGING=your-staging-gcp-project-id
 TRACE_SAMPLING_RATE=1.0
 ```
 
@@ -123,12 +125,17 @@ This server includes built-in support for Google Cloud Trace to monitor performa
 To enable GCP tracing, set these environment variables:
 
 ```bash
-# Required for GCP environments
-GOOGLE_CLOUD_PROJECT_ID=your-gcp-project-id
+# Production environment
+GCP_PROJECT_ID=your-production-gcp-project-id
+
+# Staging environment  
+GCP_PROJECT_ID_STAGING=your-staging-gcp-project-id
 
 # Optional: Control sampling rate (0.0-1.0)
 TRACE_SAMPLING_RATE=1.0  # 1.0 = trace all requests, 0.1 = trace 10%
 ```
+
+**Note**: The system will automatically use `GCP_PROJECT_ID` for production or `GCP_PROJECT_ID_STAGING` for staging environments. If neither is set, tracing will be disabled and the application will run in local development mode.
 
 ### Viewing Traces
 
@@ -143,8 +150,9 @@ TRACE_SAMPLING_RATE=1.0  # 1.0 = trace all requests, 0.1 = trace 10%
 ### Local Development
 
 Tracing works in local development but requires GCP credentials. For local development without GCP:
-- Traces will be logged to console
-- No data will be sent to GCP Trace
+- Set neither `GCP_PROJECT_ID` nor `GCP_PROJECT_ID_STAGING` 
+- Traces will be logged to console but not sent to GCP Trace
+- No GCP authentication is required
 - Performance impact is minimal
 
 ## �🔧 Development
