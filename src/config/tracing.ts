@@ -8,6 +8,17 @@ export function initializeTracing(): void {
   
   if (projectId) {
     try {
+      // Determine environment and service name for App Hub application
+      const isProduction = process.env.NODE_ENV === 'production';
+      const isStaging = process.env.NODE_ENV === 'staging';
+      
+      let serviceName = 'organic-fresh-coffee-game-server';
+      if (isProduction) {
+        serviceName = 'game server production';
+      } else if (isStaging) {
+        serviceName = 'game server staging';
+      }
+
       // Start the trace agent - this should be done as early as possible
       trace.start({
         projectId: projectId,
@@ -21,11 +32,16 @@ export function initializeTracing(): void {
         enhancedDatabaseReporting: true,
         // Maximum number of stack frames to capture
         maximumLabelValueSize: 16384,
-        // Service context
+        // Service context - this sets the App Hub application name
         serviceContext: {
-          service: 'organic-fresh-coffee-game-server',
+          service: serviceName,
           version: process.env.npm_package_version || '1.0.0',
         },
+        // Ignore certain URLs to reduce noise
+        ignoreUrls: [
+          /\/health$/,
+          /\/favicon\.ico$/,
+        ],
       });
 
       // eslint-disable-next-line no-console
@@ -225,4 +241,58 @@ export function addPayloadInfo(payload: unknown, direction: 'inbound' | 'outboun
       });
     }
   }
+}
+
+// Helper to trace Express route handlers
+export function traceRouteHandler<T>(
+  routeName: string,
+  handler: () => Promise<T>,
+  req?: { user?: { uid?: string; email?: string }; params?: Record<string, string>; query?: Record<string, unknown> }
+): Promise<T> {
+  const attributes: Record<string, string | number | boolean> = {
+    'route.name': routeName,
+    'component': 'route_handler',
+  };
+
+  if (req?.user?.uid) {
+    attributes['user.id'] = req.user.uid;
+  }
+  if (req?.params && Object.keys(req.params).length > 0) {
+    attributes['route.params'] = JSON.stringify(req.params);
+  }
+  if (req?.query && Object.keys(req.query).length > 0) {
+    attributes['route.query'] = JSON.stringify(req.query);
+  }
+
+  return createSpan(`route.${routeName}`, handler, attributes);
+}
+
+// Helper to trace service operations
+export function traceServiceOperation<T>(
+  serviceName: string,
+  operation: string,
+  fn: () => Promise<T>,
+  attributes?: Record<string, string | number | boolean>
+): Promise<T> {
+  return createSpan(`service.${serviceName}.${operation}`, fn, {
+    'service.name': serviceName,
+    'service.operation': operation,
+    'component': 'service',
+    ...attributes,
+  });
+}
+
+// Helper to trace external API calls
+export function traceExternalApiCall<T>(
+  apiName: string,
+  method: string,
+  url: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  return createSpan(`external.${apiName}`, fn, {
+    'external.service': apiName,
+    'http.method': method,
+    'http.url': url,
+    'component': 'external_api',
+  });
 }

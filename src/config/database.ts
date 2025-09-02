@@ -4,6 +4,121 @@ import { traceDbOperation, addSpanAttributes } from './tracing';
 let db: Db | null = null;
 let client: MongoClient | null = null;
 
+// Wrapper for MongoDB FindCursor to add tracing
+class TracedFindCursor<T extends Document = Document> {
+  constructor(private cursor: FindCursor<WithId<T>>, private collectionName: string) {}
+
+  async toArray(): Promise<WithId<T>[]> {
+    return traceDbOperation('find.toArray', this.collectionName, async () => {
+      const results = await this.cursor.toArray();
+      addSpanAttributes({
+        'db.mongodb.result_count': results.length,
+        'db.mongodb.result_size': JSON.stringify(results).length,
+      });
+      return results;
+    });
+  }
+
+  async next(): Promise<WithId<T> | null> {
+    return traceDbOperation('find.next', this.collectionName, async () => {
+      return this.cursor.next();
+    });
+  }
+
+  async forEach(iterator: (doc: WithId<T>) => void): Promise<void> {
+    return traceDbOperation('find.forEach', this.collectionName, async () => {
+      return this.cursor.forEach(iterator);
+    });
+  }
+
+  limit(value: number): TracedFindCursor<T> {
+    addSpanAttributes({ 'db.mongodb.limit': value });
+    this.cursor.limit(value);
+    return this;
+  }
+
+  skip(value: number): TracedFindCursor<T> {
+    addSpanAttributes({ 'db.mongodb.skip': value });
+    this.cursor.skip(value);
+    return this;
+  }
+
+  sort(sort: Document): TracedFindCursor<T> {
+    addSpanAttributes({ 'db.mongodb.sort': JSON.stringify(sort) });
+    this.cursor.sort(sort);
+    return this;
+  }
+
+  async count(): Promise<number> {
+    return traceDbOperation('find.count', this.collectionName, async () => {
+      return this.cursor.count();
+    });
+  }
+
+  // Delegate other methods to the original cursor
+  async hasNext(): Promise<boolean> {
+    return this.cursor.hasNext();
+  }
+
+  close(): Promise<void> {
+    return this.cursor.close();
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<WithId<T>> {
+    return this.cursor[Symbol.asyncIterator]();
+  }
+}
+
+// Wrapper for MongoDB AggregationCursor to add tracing
+class TracedAggregateCursor<T extends Document = Document> {
+  constructor(private cursor: ReturnType<Collection['aggregate']>, private collectionName: string) {}
+
+  async toArray(): Promise<T[]> {
+    return traceDbOperation('aggregate.toArray', this.collectionName, async () => {
+      const results = await this.cursor.toArray() as T[];
+      addSpanAttributes({
+        'db.mongodb.result_count': results.length,
+        'db.mongodb.result_size': JSON.stringify(results).length,
+      });
+      return results;
+    });
+  }
+
+  async next(): Promise<T | null> {
+    return traceDbOperation('aggregate.next', this.collectionName, async () => {
+      return this.cursor.next() as Promise<T | null>;
+    });
+  }
+
+  async forEach(iterator: (doc: T) => void): Promise<void> {
+    return traceDbOperation('aggregate.forEach', this.collectionName, async () => {
+      return this.cursor.forEach((doc: Document) => iterator(doc as T));
+    });
+  }
+
+  // Delegate other methods to the original cursor
+  async hasNext(): Promise<boolean> {
+    return this.cursor.hasNext();
+  }
+
+  close(): Promise<void> {
+    return this.cursor.close();
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    const originalIterator = this.cursor[Symbol.asyncIterator]();
+    return {
+      async next() {
+        const result = await originalIterator.next();
+        return {
+          done: result.done,
+          value: result.value as T
+        };
+      }
+    };
+  }
+}
+
 // Wrapper for MongoDB collection to add tracing
 class TracedCollection<T extends Document = Document> {
   constructor(private collection: Collection<T>) {}
@@ -18,14 +133,14 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  find(filter: Filter<T>, options?: FindOptions<T>): FindCursor<WithId<T>> {
-    // Note: find() returns a cursor, so we can't wrap it with tracing in the same way
-    // The actual database operation happens when the cursor is consumed
+  find(filter: Filter<T>, options?: FindOptions<T>): TracedFindCursor<T> {
+    // Return a traced cursor wrapper that will trace when the cursor is consumed
     addSpanAttributes({
       'db.mongodb.filter': JSON.stringify(filter),
       'db.mongodb.options': options ? JSON.stringify(options) : '',
     });
-    return this.collection.find(filter, options);
+    const cursor = this.collection.find(filter, options);
+    return new TracedFindCursor(cursor, this.collection.collectionName);
   }
 
   async insertOne(doc: OptionalUnlessRequiredId<T>, options?: InsertOneOptions): Promise<InsertOneResult<T>> {
@@ -101,14 +216,15 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  aggregate<TResult extends Document = Document>(pipeline: Document[], options?: AggregateOptions): ReturnType<Collection<T>['aggregate']> {
-    // Note: aggregate returns a cursor, so we can't wrap it with async tracing
+  aggregate<TResult extends Document = Document>(pipeline: Document[], options?: AggregateOptions): TracedAggregateCursor<TResult> {
+    // Add tracing attributes for the aggregation pipeline
     addSpanAttributes({
       'db.mongodb.pipeline': JSON.stringify(pipeline),
       'db.mongodb.pipeline_stages': pipeline.length,
       'db.mongodb.options': options ? JSON.stringify(options) : '',
     });
-    return this.collection.aggregate<TResult>(pipeline, options);
+    const cursor = this.collection.aggregate<TResult>(pipeline, options);
+    return new TracedAggregateCursor<TResult>(cursor, this.collection.collectionName);
   }
 }
 

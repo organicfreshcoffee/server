@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { dungeonService, playerService, enemyService, itemService } from '../services';
 import { changePlayerFloor, getTotalPlayerCount, getPlayerCountsByFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
+import { traceRouteHandler } from '../config/tracing';
 
 const router = Router();
 
@@ -20,37 +21,36 @@ router.use((req, res, next) => {
  */
 router.get('/current-status', async (req: AuthenticatedRequest, res): Promise<void> => {
   try {
-    const userId = req.user?.uid;
-    console.log(`Current status request for user: ${userId}`);
+    await traceRouteHandler('get-current-status', async () => {
+      const userId = req.user?.uid;
+      console.log(`Current status request for user: ${userId}`);
 
-    if (!userId) {
-      console.log('No userId found in request');
-      res.status(401).json({
-        success: false,
-        error: 'User not authenticated'
-      });
-      return;
-    }
+      if (!userId) {
+        console.log('No userId found in request');
+        res.status(401).json({
+          success: false,
+          error: 'User not authenticated'
+        });
+        return;
+      }
 
-    // Get player from database
-    console.log(`Looking up player for userId: ${userId}`);
-    const player = await playerService.getPlayer(userId);
+      // Get player from database
+      console.log(`Looking up player for userId: ${userId}`);
+      const player = await playerService.getPlayer(userId);
 
-    if (!player) {
-      console.log(`Player not found for userId: ${userId}`);
-      res.status(404).json({
-        success: false,
-        error: 'Player not found'
-      });
-      return;
-    }
+      if (!player) {
+        console.log(`Player not found for userId: ${userId}`);
+        res.status(404).json({
+          success: false,
+          error: 'Player not found'
+        });
+        return;
+      }
 
-    const currentFloor = player.currentDungeonDagNodeName || 'A'; // Default to root floor
-    console.log(`Found player ${player.username} on floor: ${currentFloor}`);
+      const currentFloor = player.currentDungeonDagNodeName || 'A'; // Default to root floor
+      console.log(`Found player ${player.username} on floor: ${currentFloor}`);
 
-    res.json({
-      success: true,
-      data: {
+      const responseData = {
         currentFloor: currentFloor,
         playerId: player.id,
         playerName: player.username,
@@ -59,9 +59,14 @@ router.get('/current-status', async (req: AuthenticatedRequest, res): Promise<vo
         health: player.health,
         character: player.character,
         isAlive: player.isAlive
-      }
-    });
-    console.log(`Successfully returned current status data for ${player.username}`);
+      };
+
+      res.json({
+        success: true,
+        data: responseData
+      });
+      console.log(`Successfully returned current status data for ${player.username}`);
+    }, req);
   } catch (error) {
     console.error('Error in get-current-status:', error);
     res.status(500).json({

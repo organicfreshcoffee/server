@@ -47,59 +47,93 @@ export class PlayerService {
   }
 
   async getPlayer(userId: string): Promise<Player | null> {
-    const db = getDatabase();
-    
-    const player = await db.collection(this.collection).findOne({ userId });
-    
-    if (!player) {
-      return null;
-    }
+    return traceGameOperation('get_player', async () => {
+      const db = getDatabase();
+      
+      addSpanAttributes({
+        'player.user_id': userId,
+      });
+      
+      const player = await db.collection(this.collection).findOne({ userId });
+      
+      if (!player) {
+        addSpanAttributes({
+          'player.found': false,
+        });
+        return null;
+      }
 
-    return {
-      id: player._id.toString(),
-      userId: player.userId,
-      username: player.username,
-      email: player.email,
-      position: player.position,
-      rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
-      character: player.character, // Character appearance/customization data
-      health: player.health,
-      maxHealth: player.maxHealth,
-      level: player.level,
-      experience: player.experience,
-      lastUpdate: player.lastUpdate,
-      isOnline: player.isOnline,
-      isAlive: player.isAlive !== undefined ? player.isAlive : true, // Default to alive if not set
-      currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
-    };
+      addSpanAttributes({
+        'player.found': true,
+        'player.id': player._id.toString(),
+        'player.username': player.username,
+        'player.is_online': player.isOnline,
+        'player.is_alive': player.isAlive !== undefined ? player.isAlive : true,
+        'player.current_floor': player.currentDungeonDagNodeName || 'A',
+      });
+
+      return {
+        id: player._id.toString(),
+        userId: player.userId,
+        username: player.username,
+        email: player.email,
+        position: player.position,
+        rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
+        character: player.character, // Character appearance/customization data
+        health: player.health,
+        maxHealth: player.maxHealth,
+        level: player.level,
+        experience: player.experience,
+        lastUpdate: player.lastUpdate,
+        isOnline: player.isOnline,
+        isAlive: player.isAlive !== undefined ? player.isAlive : true, // Default to alive if not set
+        currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
+      };
+    }, { 'player.operation': 'get' });
   }
 
   async getPlayerByEmail(email: string): Promise<Player | null> {
-    const db = getDatabase();
-    
-    const player = await db.collection(this.collection).findOne({ email });
-    
-    if (!player) {
-      return null;
-    }
+    return traceGameOperation('get_player_by_email', async () => {
+      const db = getDatabase();
+      
+      addSpanAttributes({
+        'player.email': email,
+      });
+      
+      const player = await db.collection(this.collection).findOne({ email });
+      
+      if (!player) {
+        addSpanAttributes({
+          'player.found': false,
+        });
+        return null;
+      }
 
-    return {
-      id: player._id.toString(),
-      userId: player.userId,
-      username: player.username,
-      email: player.email,
-      position: player.position,
-      rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
-      character: player.character, // Character appearance/customization data
-      health: player.health,
-      maxHealth: player.maxHealth,
-      level: player.level,
-      experience: player.experience,
-      lastUpdate: player.lastUpdate,
-      isOnline: player.isOnline,
-      isAlive: player.isAlive !== undefined ? player.isAlive : true, // Default to alive if not set
-      currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
-    };
+      addSpanAttributes({
+        'player.found': true,
+        'player.id': player._id.toString(),
+        'player.username': player.username,
+        'player.user_id': player.userId,
+      });
+
+      return {
+        id: player._id.toString(),
+        userId: player.userId,
+        username: player.username,
+        email: player.email,
+        position: player.position,
+        rotation: player.rotation || { x: 0, y: 0, z: 0 }, // Default rotation if not exists
+        character: player.character, // Character appearance/customization data
+        health: player.health,
+        maxHealth: player.maxHealth,
+        level: player.level,
+        experience: player.experience,
+        lastUpdate: player.lastUpdate,
+        isOnline: player.isOnline,
+        isAlive: player.isAlive !== undefined ? player.isAlive : true, // Default to alive if not set
+        currentDungeonDagNodeName: player.currentDungeonDagNodeName || 'A', // Default to root floor
+      };
+    }, { 'player.operation': 'get_by_email' });
   }
 
   async updatePlayerPosition(userId: string, position: Position): Promise<void> {
