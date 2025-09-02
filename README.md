@@ -46,6 +46,12 @@ CLIENT_URL=http://localhost:3000
 
 # Database Configuration
 MONGODB_URI=mongodb://admin:password@localhost:27018/gamedb?authSource=admin
+
+# Google Cloud Tracing Configuration (optional)
+# Use GCP_PROJECT_ID for production, GCP_PROJECT_ID_STAGING for staging
+# GCP_PROJECT_ID=your-production-gcp-project-id
+# GCP_PROJECT_ID_STAGING=your-staging-gcp-project-id
+TRACE_SAMPLING_RATE=1.0
 ```
 
 ### 3. Start the Server
@@ -91,6 +97,9 @@ npm run scripts:regenerate-dungeon
 | helmet | ^7.1.0 | Security middleware |
 | uuid | ^9.0.1 | UUID generation |
 | dotenv | ^16.3.1 | Environment variables |
+| @google-cloud/trace-agent | Latest | Google Cloud Trace integration |
+| @opentelemetry/api | ^1.0.0 | OpenTelemetry API for custom spans |
+| @opentelemetry/sdk-node | ^0.52.0 | OpenTelemetry SDK for Node.js |
 
 ### Development Dependencies
 
@@ -103,7 +112,50 @@ npm run scripts:regenerate-dungeon
 | nodemon | ^3.0.2 | Development server |
 | eslint | ^8.56.0 | Code linting |
 
-## 🔧 Development
+## 📊 Google Cloud Tracing
+
+This server includes built-in support for Google Cloud Trace to monitor performance and latency. Tracing is automatically enabled and provides insights into:
+
+- **Database Operations**: MongoDB queries, inserts, updates, and deletes
+- **HTTP Requests**: External API calls (like auth server verification)
+- **Game Logic**: Player operations, dungeon generation, and game state management
+
+### Configuration
+
+To enable GCP tracing, set these environment variables:
+
+```bash
+# Production environment
+GCP_PROJECT_ID=your-production-gcp-project-id
+
+# Staging environment  
+GCP_PROJECT_ID_STAGING=your-staging-gcp-project-id
+
+# Optional: Control sampling rate (0.0-1.0)
+TRACE_SAMPLING_RATE=1.0  # 1.0 = trace all requests, 0.1 = trace 10%
+```
+
+**Note**: The system will automatically use `GCP_PROJECT_ID` for production or `GCP_PROJECT_ID_STAGING` for staging environments. If neither is set, tracing will be disabled and the application will run in local development mode.
+
+### Viewing Traces
+
+1. **In GCP Console**: Navigate to "Trace" in your Google Cloud Console
+2. **Trace Explorer**: View detailed trace timelines and performance metrics
+3. **Custom Spans**: Look for spans prefixed with:
+   - `db.*` - Database operations
+   - `http.*` - HTTP requests
+   - `game.*` - Game logic operations
+   - `auth.*` - Authentication operations
+
+### Local Development
+
+Tracing works in local development but requires GCP credentials. For local development without GCP:
+- Set neither `GCP_PROJECT_ID` nor `GCP_PROJECT_ID_STAGING` 
+- Traces will be logged to console but not sent to GCP Trace
+- No GCP authentication is required
+- Performance impact is minimal
+
+## �🔧 Development
 
 ### Running Individual Services
 

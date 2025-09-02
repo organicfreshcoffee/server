@@ -1,19 +1,24 @@
+// Load environment variables first
+import dotenv from 'dotenv';
+dotenv.config();
+
+// Initialize tracing as early as possible
+import { initializeTracing } from './config/tracing';
+initializeTracing();
+
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import helmet from 'helmet';
-import dotenv from 'dotenv';
 
 import { connectToDatabase } from './config/database';
 import { errorHandler } from './middleware/errorHandler';
+import { tracingMiddleware, userTracingMiddleware } from './middleware/tracing';
 import { setupWebSocketServer } from './services/websocket';
 import dungeonRoutes from './routes/dungeon';
 import userRoutes from './routes/user';
 import { dungeonService, enemyService } from './services';
-
-// Load environment variables
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -21,6 +26,10 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 
 // Security middleware
 app.use(helmet());
+
+// Tracing middleware (should be early in the middleware stack)
+app.use(tracingMiddleware());
+
 app.use(cors({
   origin: [
     'https://organicfreshcoffee.com',
@@ -42,6 +51,9 @@ app.use(cors({
 // Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// User context tracing middleware (after auth middleware would set req.user)
+app.use(userTracingMiddleware());
 
 // Health check endpoint
 app.get('/health', (req, res) => {
