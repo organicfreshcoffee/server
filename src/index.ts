@@ -27,9 +27,7 @@ const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:3000';
 // Security middleware
 app.use(helmet());
 
-// Tracing middleware (should be early in the middleware stack)
-app.use(tracingMiddleware());
-
+// CORS should be before tracing middleware
 app.use(cors({
   origin: [
     'https://organicfreshcoffee.com',
@@ -48,9 +46,12 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Body parsing middleware
+// Body parsing middleware (before tracing so request body is available)
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Tracing middleware (should be after body parsing but before routes)
+app.use(tracingMiddleware());
 
 // User context tracing middleware (after auth middleware would set req.user)
 app.use(userTracingMiddleware());
