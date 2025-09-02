@@ -1,4 +1,4 @@
-import { MongoClient, Db, Collection, Document } from 'mongodb';
+import { MongoClient, Db, Collection, Document, Filter, FindOptions, InsertOneOptions, UpdateOptions, DeleteOptions, CountDocumentsOptions, AggregateOptions, FindCursor, WithId, InsertOneResult, InsertManyResult, UpdateResult, DeleteResult, BulkWriteOptions, OptionalUnlessRequiredId } from 'mongodb';
 import { traceDbOperation, addSpanAttributes } from './tracing';
 
 let db: Db | null = null;
@@ -8,7 +8,7 @@ let client: MongoClient | null = null;
 class TracedCollection<T extends Document = Document> {
   constructor(private collection: Collection<T>) {}
 
-  async findOne(filter: any, options?: any): Promise<any> {
+  async findOne(filter: Filter<T>, options?: FindOptions<T>): Promise<WithId<T> | null> {
     return traceDbOperation('findOne', this.collection.collectionName, async () => {
       addSpanAttributes({
         'db.mongodb.filter': JSON.stringify(filter),
@@ -18,17 +18,17 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  async find(filter: any, options?: any) {
-    return traceDbOperation('find', this.collection.collectionName, async () => {
-      addSpanAttributes({
-        'db.mongodb.filter': JSON.stringify(filter),
-        'db.mongodb.options': options ? JSON.stringify(options) : '',
-      });
-      return this.collection.find(filter, options);
+  find(filter: Filter<T>, options?: FindOptions<T>): FindCursor<WithId<T>> {
+    // Note: find() returns a cursor, so we can't wrap it with tracing in the same way
+    // The actual database operation happens when the cursor is consumed
+    addSpanAttributes({
+      'db.mongodb.filter': JSON.stringify(filter),
+      'db.mongodb.options': options ? JSON.stringify(options) : '',
     });
+    return this.collection.find(filter, options);
   }
 
-  async insertOne(doc: any, options?: any) {
+  async insertOne(doc: OptionalUnlessRequiredId<T>, options?: InsertOneOptions): Promise<InsertOneResult<T>> {
     return traceDbOperation('insertOne', this.collection.collectionName, async () => {
       addSpanAttributes({
         'db.mongodb.document_size': JSON.stringify(doc).length,
@@ -38,7 +38,7 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  async insertMany(docs: any[], options?: any) {
+  async insertMany(docs: OptionalUnlessRequiredId<T>[], options?: BulkWriteOptions): Promise<InsertManyResult<T>> {
     return traceDbOperation('insertMany', this.collection.collectionName, async () => {
       addSpanAttributes({
         'db.mongodb.document_count': docs.length,
@@ -49,7 +49,7 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  async updateOne(filter: any, update: any, options?: any) {
+  async updateOne(filter: Filter<T>, update: Document, options?: UpdateOptions): Promise<UpdateResult> {
     return traceDbOperation('updateOne', this.collection.collectionName, async () => {
       addSpanAttributes({
         'db.mongodb.filter': JSON.stringify(filter),
@@ -60,7 +60,7 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  async updateMany(filter: any, update: any, options?: any) {
+  async updateMany(filter: Filter<T>, update: Document, options?: UpdateOptions): Promise<UpdateResult> {
     return traceDbOperation('updateMany', this.collection.collectionName, async () => {
       addSpanAttributes({
         'db.mongodb.filter': JSON.stringify(filter),
@@ -71,7 +71,7 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  async deleteOne(filter: any, options?: any) {
+  async deleteOne(filter: Filter<T>, options?: DeleteOptions): Promise<DeleteResult> {
     return traceDbOperation('deleteOne', this.collection.collectionName, async () => {
       addSpanAttributes({
         'db.mongodb.filter': JSON.stringify(filter),
@@ -81,7 +81,7 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  async deleteMany(filter: any, options?: any) {
+  async deleteMany(filter: Filter<T>, options?: DeleteOptions): Promise<DeleteResult> {
     return traceDbOperation('deleteMany', this.collection.collectionName, async () => {
       addSpanAttributes({
         'db.mongodb.filter': JSON.stringify(filter),
@@ -91,7 +91,7 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  async countDocuments(filter?: any, options?: any) {
+  async countDocuments(filter?: Filter<T>, options?: CountDocumentsOptions): Promise<number> {
     return traceDbOperation('countDocuments', this.collection.collectionName, async () => {
       addSpanAttributes({
         'db.mongodb.filter': filter ? JSON.stringify(filter) : '{}',
@@ -101,15 +101,14 @@ class TracedCollection<T extends Document = Document> {
     });
   }
 
-  async aggregate(pipeline: any[], options?: any) {
-    return traceDbOperation('aggregate', this.collection.collectionName, async () => {
-      addSpanAttributes({
-        'db.mongodb.pipeline': JSON.stringify(pipeline),
-        'db.mongodb.pipeline_stages': pipeline.length,
-        'db.mongodb.options': options ? JSON.stringify(options) : '',
-      });
-      return this.collection.aggregate(pipeline, options);
+  aggregate<TResult extends Document = Document>(pipeline: Document[], options?: AggregateOptions): ReturnType<Collection<T>['aggregate']> {
+    // Note: aggregate returns a cursor, so we can't wrap it with async tracing
+    addSpanAttributes({
+      'db.mongodb.pipeline': JSON.stringify(pipeline),
+      'db.mongodb.pipeline_stages': pipeline.length,
+      'db.mongodb.options': options ? JSON.stringify(options) : '',
     });
+    return this.collection.aggregate<TResult>(pipeline, options);
   }
 }
 
@@ -122,12 +121,29 @@ class TracedDatabase {
   }
 
   // Pass through other database methods
-  admin() { return this.db.admin(); }
-  command(command: any, options?: any) { return this.db.command(command, options); }
-  createCollection(name: string, options?: any) { return this.db.createCollection(name, options); }
-  dropCollection(name: string) { return this.db.dropCollection(name); }
-  listCollections(filter?: any, options?: any) { return this.db.listCollections(filter, options); }
-  stats(options?: any) { return this.db.stats(options); }
+  admin(): ReturnType<Db['admin']> { 
+    return this.db.admin(); 
+  }
+  
+  command(command: Document, options?: Document): ReturnType<Db['command']> { 
+    return this.db.command(command, options); 
+  }
+  
+  createCollection(name: string, options?: Document): ReturnType<Db['createCollection']> { 
+    return this.db.createCollection(name, options); 
+  }
+  
+  dropCollection(name: string): ReturnType<Db['dropCollection']> { 
+    return this.db.dropCollection(name); 
+  }
+  
+  listCollections(filter?: Document, options?: Document): ReturnType<Db['listCollections']> { 
+    return this.db.listCollections(filter, options); 
+  }
+  
+  stats(options?: Document): ReturnType<Db['stats']> { 
+    return this.db.stats(options); 
+  }
 }
 
 export async function connectToDatabase(): Promise<TracedDatabase> {
@@ -149,9 +165,11 @@ export async function connectToDatabase(): Promise<TracedDatabase> {
       const dbName = process.env.MONGODB_DB_NAME || 'gamedb';
       db = client.db(dbName);
       
+      // eslint-disable-next-line no-console
       console.log(`Connected to MongoDB database: ${dbName}`);
       return new TracedDatabase(db);
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.error('MongoDB connection error:', error);
       throw error;
     }
@@ -170,6 +188,7 @@ export async function closeDatabase(): Promise<void> {
     await client.close();
     client = null;
     db = null;
+    // eslint-disable-next-line no-console
     console.log('MongoDB connection closed');
   }
 }
