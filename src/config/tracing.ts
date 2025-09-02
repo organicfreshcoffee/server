@@ -38,7 +38,7 @@ export function initializeTracing(): void {
 // Helper function to create custom spans
 export function createSpan<T>(name: string, fn: () => Promise<T>, attributes?: Record<string, string | number | boolean>): Promise<T> {
   // Check if tracing is enabled (GCP project ID is set)
-  const isTracingEnabled = !!process.env.GOOGLE_CLOUD_PROJECT_ID;
+  const isTracingEnabled = !!(process.env.GCP_PROJECT_ID || process.env.GCP_PROJECT_ID_STAGING);
   
   if (!isTracingEnabled) {
     // If tracing is disabled, just execute the function without span
@@ -75,7 +75,7 @@ export function createSpan<T>(name: string, fn: () => Promise<T>, attributes?: R
 // Helper function to add attributes to current span
 export function addSpanAttributes(attributes: Record<string, string | number | boolean>): void {
   // Only add attributes if tracing is enabled
-  if (!process.env.GOOGLE_CLOUD_PROJECT_ID) return;
+  if (!(process.env.GCP_PROJECT_ID || process.env.GCP_PROJECT_ID_STAGING)) return;
   
   const currentSpan = otelTrace.getActiveSpan();
   if (currentSpan) {
@@ -86,7 +86,7 @@ export function addSpanAttributes(attributes: Record<string, string | number | b
 // Helper function to add events to current span
 export function addSpanEvent(name: string, attributes?: Record<string, string | number | boolean>): void {
   // Only add events if tracing is enabled
-  if (!process.env.GOOGLE_CLOUD_PROJECT_ID) return;
+  if (!(process.env.GCP_PROJECT_ID || process.env.GCP_PROJECT_ID_STAGING)) return;
   
   const currentSpan = otelTrace.getActiveSpan();
   if (currentSpan) {
