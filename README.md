@@ -112,7 +112,7 @@ npm run scripts:regenerate-dungeon
 | nodemon | ^3.0.2 | Development server |
 | eslint | ^8.56.0 | Code linting |
 
-## � Google Cloud Tracing
+## 📊 Google Cloud Tracing
 
 This server includes built-in support for Google Cloud Trace to monitor performance and latency. Tracing is automatically enabled and provides insights into:
 

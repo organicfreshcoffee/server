@@ -8,6 +8,7 @@ import { DungeonService } from './dungeonService';
 import { GameMessage, WebSocketClient, GameState, Player } from '../types/game';
 import { MoveData, ActionData, RespawnData } from './gameTypes';
 import { createSafePlayerData } from './gameUtils';
+import { traceWebSocketOperation, traceWebSocketMessage, addSpanAttributes, addPayloadInfo } from '../config/tracing';
 import { 
   addClientToFloor, 
   removeClientFromFloor, 
@@ -111,7 +112,15 @@ export function setupWebSocketServer(wss: WebSocketServer): void {
     ws.on('message', async (data: Buffer) => {
       try {
         const message: GameMessage = JSON.parse(data.toString());
-        await handleMessage(clientId, message);
+        await traceWebSocketOperation('receive_message', async () => {
+          addSpanAttributes({
+            'websocket.client.id': clientId,
+            'websocket.message.size_bytes': data.length,
+            'websocket.message.type': message.type,
+          });
+          
+          await handleMessage(clientId, message);
+        });
       } catch (error) {
         console.error('Error parsing message:', error);
         sendErrorMessageLocal(clientId, 'Invalid message format');
@@ -149,32 +158,45 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
     return;
   }
 
-  try {
-    switch (message.type) {
-      case 'player_move':
-        await handlePlayerMove(clientId, message.data as unknown as MoveData, clients, gameState, playerService);
-        break;
+  // Trace the WebSocket message handling
+  return traceWebSocketMessage(message.type, message.data, async () => {
+    addSpanAttributes({
+      'websocket.client.id': clientId,
+      'websocket.client.player_id': client.playerId || 'unknown',
+      'websocket.client.user_id': client.userId || 'unknown',
+      'websocket.message.type': message.type,
+    });
 
-      case 'player_action':
-        await handlePlayerAction(clientId, message.data as unknown as ActionData, clients, gameState, playerService, enemyService);
-        break;
+    addPayloadInfo(message, 'inbound');
 
-      case 'player_respawn':
-        await handlePlayerRespawn(clientId, message.data as unknown as RespawnData, clients, gameState, playerService, dungeonService);
-        break;
+    try {
+      switch (message.type) {
+        case 'player_move':
+          await handlePlayerMove(clientId, message.data as unknown as MoveData, clients, gameState, playerService);
+          break;
 
-      case 'ping':
-        handlePing(clientId);
-        break;
+        case 'player_action':
+          await handlePlayerAction(clientId, message.data as unknown as ActionData, clients, gameState, playerService, enemyService);
+          break;
+
+        case 'player_respawn':
+          await handlePlayerRespawn(clientId, message.data as unknown as RespawnData, clients, gameState, playerService, dungeonService);
+          break;
+
+        case 'ping':
+          handlePing(clientId);
+          break;
 
       default:
         console.log(`Unknown message type: ${message.type}`);
         sendErrorMessageLocal(clientId, `Unknown message type: ${message.type}`);
     }
-  } catch (error) {
-    console.error(`Error handling message ${message.type}:`, error);
-    sendErrorMessageLocal(clientId, 'Error processing message');
-  }
+    } catch (error) {
+      console.error(`Error handling message ${message.type}:`, error);
+      sendErrorMessageLocal(clientId, 'Error processing message');
+      throw error; // Re-throw to be caught by tracing
+    }
+  }, clientId, client.userId);
 }
 
 async function handleAutoConnect(clientId: string, token: string): Promise<void> {

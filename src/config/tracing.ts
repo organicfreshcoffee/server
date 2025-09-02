@@ -19,6 +19,13 @@ export function initializeTracing(): void {
         flushDelaySeconds: 30,
         // Enable enhanced database reporting
         enhancedDatabaseReporting: true,
+        // Maximum number of stack frames to capture
+        maximumLabelValueSize: 16384,
+        // Service context
+        serviceContext: {
+          service: 'organic-fresh-coffee-game-server',
+          version: process.env.npm_package_version || '1.0.0',
+        },
       });
 
       // eslint-disable-next-line no-console
@@ -45,9 +52,18 @@ export function createSpan<T>(name: string, fn: () => Promise<T>, attributes?: R
     return fn();
   }
 
-  const tracer = otelTrace.getTracer('game-server');
+  const tracer = otelTrace.getTracer('game-server', '1.0.0');
   
-  return tracer.startActiveSpan(name, { kind: SpanKind.INTERNAL }, async (span) => {
+  return tracer.startActiveSpan(name, { 
+    kind: SpanKind.INTERNAL,
+    attributes: {
+      'service.name': 'organic-fresh-coffee-game-server',
+      'service.version': process.env.npm_package_version || '1.0.0',
+      ...attributes,
+    }
+  }, async (span) => {
+    const startTime = Date.now();
+    
     try {
       // Add custom attributes
       if (attributes) {
@@ -57,13 +73,37 @@ export function createSpan<T>(name: string, fn: () => Promise<T>, attributes?: R
       }
 
       const result = await fn();
-      span.setStatus({ code: SpanStatusCode.OK });
+      
+      // Mark span as successful
+      span.setStatus({ 
+        code: SpanStatusCode.OK,
+        message: 'Operation completed successfully'
+      });
+      
+      const duration = Date.now() - startTime;
+      span.setAttributes({
+        'operation.duration_ms': duration,
+        'operation.success': true,
+      });
+
       return result;
     } catch (error) {
+      const duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // Mark span as failed
       span.setStatus({ 
         code: SpanStatusCode.ERROR, 
-        message: error instanceof Error ? error.message : 'Unknown error' 
+        message: errorMessage
       });
+      
+      span.setAttributes({
+        'operation.duration_ms': duration,
+        'operation.success': false,
+        'error.name': error instanceof Error ? error.name : 'UnknownError',
+        'error.message': errorMessage,
+      });
+      
       span.recordException(error as Error);
       throw error;
     } finally {
@@ -131,4 +171,58 @@ export async function traceGameOperation<T>(
     'service.operation': operation,
     ...gameAttributes,
   });
+}
+
+// Wrapper for WebSocket operations
+export async function traceWebSocketOperation<T>(
+  operation: string,
+  fn: () => Promise<T>,
+  wsAttributes?: Record<string, string | number | boolean>
+): Promise<T> {
+  return createSpan(`websocket.${operation}`, fn, {
+    'websocket.operation': operation,
+    'protocol': 'websocket',
+    ...wsAttributes,
+  });
+}
+
+// Helper to trace WebSocket message handling
+export function traceWebSocketMessage<T>(
+  messageType: string,
+  payload: unknown,
+  fn: () => Promise<T>,
+  clientId?: string,
+  userId?: string
+): Promise<T> {
+  const payloadSize = JSON.stringify(payload).length;
+  
+  return traceWebSocketOperation(`message.${messageType}`, fn, {
+    'websocket.message.type': messageType,
+    'websocket.message.size_bytes': payloadSize,
+    'websocket.client.id': clientId || 'unknown',
+    'user.id': userId || 'unknown',
+  });
+}
+
+// Helper to add payload information to current span
+export function addPayloadInfo(payload: unknown, direction: 'inbound' | 'outbound'): void {
+  if (!(process.env.GCP_PROJECT_ID || process.env.GCP_PROJECT_ID_STAGING)) return;
+  
+  const currentSpan = otelTrace.getActiveSpan();
+  if (currentSpan && payload) {
+    const payloadStr = JSON.stringify(payload);
+    const payloadSize = payloadStr.length;
+    
+    currentSpan.setAttributes({
+      [`payload.${direction}.size_bytes`]: payloadSize,
+      [`payload.${direction}.type`]: typeof payload,
+    });
+    
+    // Add payload content for small payloads (under 1KB)
+    if (payloadSize < 1024) {
+      currentSpan.setAttributes({
+        [`payload.${direction}.content`]: payloadStr,
+      });
+    }
+  }
 }
