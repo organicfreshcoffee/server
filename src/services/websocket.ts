@@ -8,7 +8,6 @@ import { DungeonService } from './dungeonService';
 import { GameMessage, WebSocketClient, GameState, Player } from '../types/game';
 import { MoveData, ActionData, RespawnData } from './gameTypes';
 import { createSafePlayerData } from './gameUtils';
-import { traceGameOperation, addSpanAttributes, addSpanEvent } from '../config/tracing';
 import { 
   addClientToFloor, 
   removeClientFromFloor, 

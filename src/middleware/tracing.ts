@@ -4,7 +4,7 @@ import { createSpan, addSpanAttributes } from '../config/tracing';
 /**
  * Express middleware to automatically trace HTTP requests
  */
-export function tracingMiddleware() {
+export function tracingMiddleware(): (req: Request, res: Response, next: NextFunction) => void {
   return (req: Request, res: Response, next: NextFunction) => {
     const startTime = Date.now();
     
@@ -20,9 +20,8 @@ export function tracingMiddleware() {
           'http.request.size': parseInt(req.get('Content-Length') || '0'),
         });
 
-        // Override res.end to capture response data
-        const originalEnd = res.end.bind(res);
-        res.end = function(this: Response, chunk?: any, encoding?: any, cb?: any): Response {
+        // Listen for response finish event instead of overriding methods
+        res.on('finish', () => {
           const duration = Date.now() - startTime;
           
           // Add response attributes
@@ -32,15 +31,13 @@ export function tracingMiddleware() {
             'http.duration_ms': duration,
           });
 
-          // Call original end method and return the result
-          const result = originalEnd(chunk, encoding, cb);
           resolve();
-          return result;
-        } as any;
+        });
 
         next();
       });
     }).catch((error) => {
+      // eslint-disable-next-line no-console
       console.error('Tracing middleware error:', error);
       next();
     });
@@ -50,7 +47,7 @@ export function tracingMiddleware() {
 /**
  * Middleware to add user context to traces when available
  */
-export function userTracingMiddleware() {
+export function userTracingMiddleware(): (req: Request, res: Response, next: NextFunction) => void {
   return (req: Request, res: Response, next: NextFunction) => {
     // If user information is available (set by auth middleware)
     if (req.user) {
@@ -65,14 +62,12 @@ export function userTracingMiddleware() {
 }
 
 // Extend Express Request type to include user
-declare global {
-  namespace Express {
-    interface Request {
-      user?: {
-        uid: string;
-        email?: string;
-        name?: string;
-      };
-    }
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: {
+      uid: string;
+      email?: string;
+      name?: string;
+    };
   }
 }

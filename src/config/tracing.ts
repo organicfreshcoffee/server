@@ -1,8 +1,8 @@
 import * as trace from '@google-cloud/trace-agent';
-import { trace as otelTrace, context, SpanStatusCode, SpanKind } from '@opentelemetry/api';
+import { trace as otelTrace, SpanStatusCode, SpanKind } from '@opentelemetry/api';
 
 // Initialize Google Cloud Trace
-export function initializeTracing() {
+export function initializeTracing(): void {
   const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
   
   // Only initialize GCP tracing if project ID is provided
@@ -21,18 +21,22 @@ export function initializeTracing() {
         enhancedDatabaseReporting: true,
       });
 
+      // eslint-disable-next-line no-console
       console.log(`Google Cloud Trace initialized for project: ${projectId}`);
     } catch (error) {
+      // eslint-disable-next-line no-console
       console.warn('Failed to initialize Google Cloud Trace:', error);
+      // eslint-disable-next-line no-console
       console.log('Continuing without GCP tracing - local development mode');
     }
   } else {
+    // eslint-disable-next-line no-console
     console.log('GOOGLE_CLOUD_PROJECT_ID not set - running in local development mode without GCP tracing');
   }
 }
 
 // Helper function to create custom spans
-export function createSpan(name: string, fn: () => Promise<any>, attributes?: Record<string, string | number | boolean>) {
+export function createSpan<T>(name: string, fn: () => Promise<T>, attributes?: Record<string, string | number | boolean>): Promise<T> {
   // Check if tracing is enabled (GCP project ID is set)
   const isTracingEnabled = !!process.env.GOOGLE_CLOUD_PROJECT_ID;
   
@@ -69,7 +73,7 @@ export function createSpan(name: string, fn: () => Promise<any>, attributes?: Re
 }
 
 // Helper function to add attributes to current span
-export function addSpanAttributes(attributes: Record<string, string | number | boolean>) {
+export function addSpanAttributes(attributes: Record<string, string | number | boolean>): void {
   // Only add attributes if tracing is enabled
   if (!process.env.GOOGLE_CLOUD_PROJECT_ID) return;
   
@@ -80,7 +84,7 @@ export function addSpanAttributes(attributes: Record<string, string | number | b
 }
 
 // Helper function to add events to current span
-export function addSpanEvent(name: string, attributes?: Record<string, string | number | boolean>) {
+export function addSpanEvent(name: string, attributes?: Record<string, string | number | boolean>): void {
   // Only add events if tracing is enabled
   if (!process.env.GOOGLE_CLOUD_PROJECT_ID) return;
   
