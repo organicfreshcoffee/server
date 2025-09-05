@@ -670,4 +670,92 @@ router.post('/pickup-item', async (req: AuthenticatedRequest, res): Promise<void
   }
 });
 
+/**
+ * Drop an item
+ * POST /api/dungeon/drop-item
+ */
+router.post('/drop-item', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    const { itemId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    if (!itemId) {
+      res.status(400).json({
+        success: false,
+        error: 'Item ID is required'
+      });
+      return;
+    }
+
+    // Get player to access current position and floor
+    const player = await playerService.getPlayer(userId);
+    if (!player) {
+      res.status(404).json({
+        success: false,
+        error: 'Player not found'
+      });
+      return;
+    }
+
+    const currentFloor = player.currentDungeonDagNodeName || 'A';
+    
+    // Get floor tiles for the current floor
+    const tileData = await dungeonService.getGeneratedFloorTileData(currentFloor);
+    if (!tileData || !tileData.tiles.floorTiles.length) {
+      res.status(400).json({
+        success: false,
+        error: 'No floor tiles found for current floor'
+      });
+      return;
+    }
+
+    const floorTilePositions = tileData.tiles.floorTiles.map(tile => ({
+      x: tile.x,
+      y: tile.y
+    }));
+
+    // Try to drop the item at the player's current position
+    const success = await itemService.dropItem(
+      itemId, 
+      userId, 
+      player.position.x, 
+      player.position.z, 
+      currentFloor,
+      floorTilePositions
+    );
+
+    if (success) {
+      // Get the updated item data to send back
+      const { getDatabase } = await import('../config/database');
+      const db = getDatabase();
+      const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
+
+      res.json({
+        success: true,
+        message: 'Item dropped successfully',
+        item: updatedItem
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'Item could not be dropped (may not belong to player or not exist)'
+      });
+    }
+  } catch (error) {
+    console.error('Error in drop-item:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
 export default router;
