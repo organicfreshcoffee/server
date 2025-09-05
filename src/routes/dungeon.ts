@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import e, { Router } from 'express';
 import { dungeonService, playerService, enemyService, itemService } from '../services';
 import { changePlayerFloor, getTotalPlayerCount, getPlayerCountsByFloor } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
@@ -548,6 +548,7 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
         manaMultiplier: number;
       };
       spawnDatetime: Date;
+      equipped: boolean;
     }
 
     const itemsByCategory: Record<string, InventoryItem[]> = {};
@@ -573,7 +574,8 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
         weight: item.weight,
         weaponStats: item.weaponStats,
         armorStats: item.armorStats,
-        spawnDatetime: item.spawnDatetime
+        spawnDatetime: item.spawnDatetime,
+        equipped: item.equipped
       });
     }
 
@@ -596,7 +598,8 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
             weight: item.weight,
             weaponStats: item.weaponStats,
             armorStats: item.armorStats,
-            spawnDatetime: item.spawnDatetime
+            spawnDatetime: item.spawnDatetime,
+            equipped: item.equipped
           })),
           itemsByCategory,
           statistics: {
