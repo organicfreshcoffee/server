@@ -448,12 +448,13 @@ router.get('/visited-nodes', async (req: AuthenticatedRequest, res): Promise<voi
 });
 
 /**
- * Get items on current floor
- * GET /api/dungeon/floor-items
+ * Get items on specified floor
+ * GET /api/dungeon/floor-items?floorName=<floorName>
  */
 router.get('/floor-items', async (req: AuthenticatedRequest, res): Promise<void> => {
   try {
     const userId = req.user?.uid;
+    const { floorName } = req.query;
 
     if (!userId) {
       res.status(401).json({
@@ -463,24 +464,21 @@ router.get('/floor-items', async (req: AuthenticatedRequest, res): Promise<void>
       return;
     }
 
-    // Get player's current floor
-    const player = await playerService.getPlayer(userId);
-    if (!player) {
-      res.status(404).json({
+    if (!floorName || typeof floorName !== 'string') {
+      res.status(400).json({
         success: false,
-        error: 'Player not found'
+        error: 'floorName query parameter is required and must be a string'
       });
       return;
     }
 
-    // Get items on the player's current floor
-    const currentFloor = player.currentDungeonDagNodeName || 'A'; // Default to root floor
-    const items = await itemService.getItemsOnFloor(currentFloor);
+    // Get items on the specified floor
+    const items = await itemService.getItemsOnFloor(floorName);
 
     res.json({
       success: true,
       data: {
-        floor: currentFloor,
+        floor: floorName,
         items: items
       }
     });
