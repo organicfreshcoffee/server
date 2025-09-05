@@ -695,6 +695,31 @@ router.post('/drop-item', async (req: AuthenticatedRequest, res): Promise<void> 
       return;
     }
 
+    // Check if the item is equipped before allowing drop
+    const { getDatabase } = await import('../config/database');
+    const db = getDatabase();
+    const itemToCheck = await db.collection('itemInstances').findOne({ 
+      id: itemId, 
+      owner: userId, 
+      inWorld: false 
+    });
+
+    if (!itemToCheck) {
+      res.status(404).json({
+        success: false,
+        error: 'Item not found or not owned by player'
+      });
+      return;
+    }
+
+    if (itemToCheck.equipped === true) {
+      res.status(400).json({
+        success: false,
+        error: 'Cannot drop equipped items. Unequip the item first.'
+      });
+      return;
+    }
+
     // Get player to access current position and floor
     const player = await playerService.getPlayer(userId);
     if (!player) {
@@ -734,8 +759,6 @@ router.post('/drop-item', async (req: AuthenticatedRequest, res): Promise<void> 
 
     if (success) {
       // Get the updated item data to send back
-      const { getDatabase } = await import('../config/database');
-      const db = getDatabase();
       const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
 
       res.json({
@@ -746,11 +769,137 @@ router.post('/drop-item', async (req: AuthenticatedRequest, res): Promise<void> 
     } else {
       res.status(400).json({
         success: false,
-        error: 'Item could not be dropped (may not belong to player or not exist)'
+        error: 'Item could not be dropped (may not belong to player, not exist, or is equipped)'
       });
     }
   } catch (error) {
     console.error('Error in drop-item:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Equip an item
+ * POST /api/dungeon/equip-item
+ */
+router.post('/equip-item', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    const { itemId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    if (!itemId) {
+      res.status(400).json({
+        success: false,
+        error: 'Item ID is required'
+      });
+      return;
+    }
+
+    // Update the item to set equipped to true
+    const { getDatabase } = await import('../config/database');
+    const db = getDatabase();
+    const result = await db.collection('itemInstances').updateOne(
+      { 
+        id: itemId, 
+        owner: userId, 
+        inWorld: false 
+      },
+      { 
+        $set: { equipped: true }
+      }
+    );
+
+    if (result.modifiedCount > 0) {
+      // Get the updated item data to send back
+      const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
+
+      res.json({
+        success: true,
+        message: 'Item equipped successfully',
+        item: updatedItem
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'Item could not be equipped (may not belong to player or not exist)'
+      });
+    }
+  } catch (error) {
+    console.error('Error in equip-item:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Unequip an item
+ * POST /api/dungeon/unequip-item
+ */
+router.post('/unequip-item', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    const { itemId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    if (!itemId) {
+      res.status(400).json({
+        success: false,
+        error: 'Item ID is required'
+      });
+      return;
+    }
+
+    // Update the item to set equipped to false
+    const { getDatabase } = await import('../config/database');
+    const db = getDatabase();
+    const result = await db.collection('itemInstances').updateOne(
+      { 
+        id: itemId, 
+        owner: userId, 
+        inWorld: false 
+      },
+      { 
+        $set: { equipped: false }
+      }
+    );
+
+    if (result.modifiedCount > 0) {
+      // Get the updated item data to send back
+      const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
+
+      res.json({
+        success: true,
+        message: 'Item unequipped successfully',
+        item: updatedItem
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'Item could not be unequipped (may not belong to player or not exist)'
+      });
+    }
+  } catch (error) {
+    console.error('Error in unequip-item:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'
