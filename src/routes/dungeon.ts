@@ -809,9 +809,89 @@ router.post('/equip-item', async (req: AuthenticatedRequest, res): Promise<void>
       return;
     }
 
-    // Update the item to set equipped to true
     const { getDatabase } = await import('../config/database');
     const db = getDatabase();
+
+    // First, get the item to check its category and verify ownership
+    const itemToEquip = await db.collection('itemInstances').findOne({ 
+      id: itemId, 
+      owner: userId, 
+      inWorld: false 
+    });
+
+    if (!itemToEquip) {
+      res.status(404).json({
+        success: false,
+        error: 'Item not found or not owned by player'
+      });
+      return;
+    }
+
+    // Check if item is already equipped
+    if (itemToEquip.equipped === true) {
+      res.status(400).json({
+        success: false,
+        error: 'Item is already equipped'
+      });
+      return;
+    }
+
+    // Define equipment slot limits
+    const equipmentLimits: Record<string, number> = {
+      'Ring': 2,
+      'Amulet': 1,
+      'Chest armor': 1,
+      'Head armor': 1,
+      'Cloak': 1,
+      'Leg armor': 1,
+      'Shoes': 1,
+      'Gloves': 1,
+      'Shield': 1,
+      'Range Weapon': 1,
+      'Melee Weapon': 1,
+      'Magic Weapon': 1
+    };
+
+    const itemCategory = itemToEquip.category;
+    const maxAllowed = equipmentLimits[itemCategory];
+
+    if (maxAllowed === undefined) {
+      res.status(400).json({
+        success: false,
+        error: `Items of category '${itemCategory}' cannot be equipped`
+      });
+      return;
+    }
+
+    // For weapons, check all weapon types together (only 1 weapon total)
+    let currentlyEquippedCount = 0;
+    if (['Range Weapon', 'Melee Weapon', 'Magic Weapon'].includes(itemCategory)) {
+      currentlyEquippedCount = await db.collection('itemInstances').countDocuments({
+        owner: userId,
+        inWorld: false,
+        equipped: true,
+        category: { $in: ['Range Weapon', 'Melee Weapon', 'Magic Weapon'] }
+      });
+    } else {
+      // For other items, check only the specific category
+      currentlyEquippedCount = await db.collection('itemInstances').countDocuments({
+        owner: userId,
+        inWorld: false,
+        equipped: true,
+        category: itemCategory
+      });
+    }
+
+    if (currentlyEquippedCount >= maxAllowed) {
+      const itemType = ['Range Weapon', 'Melee Weapon', 'Magic Weapon'].includes(itemCategory) ? 'weapon' : itemCategory.toLowerCase();
+      res.status(400).json({
+        success: false,
+        error: `Cannot equip ${itemCategory}. You already have the maximum number of ${itemType}${maxAllowed > 1 ? 's' : ''} equipped (${currentlyEquippedCount}/${maxAllowed})`
+      });
+      return;
+    }
+
+    // Update the item to set equipped to true
     const result = await db.collection('itemInstances').updateOne(
       { 
         id: itemId, 
