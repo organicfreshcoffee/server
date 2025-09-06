@@ -39,3 +39,11 @@ export interface SpellData {
   timestamp?: number;
   casterPosition?: Position;
 }
+
+export interface AttackData {
+  fromPosition: Position;
+  toPosition: Position;
+  direction: Position;
+  range: number;
+  timestamp: number;
+}
