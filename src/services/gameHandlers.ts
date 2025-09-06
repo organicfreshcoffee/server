@@ -1,10 +1,10 @@
 import { WebSocket } from 'ws';
 import { WebSocketClient, GameState, GameMessage } from '../types/game';
-import { SpellData, MoveData, ActionData, RespawnData, MoveBroadcastData } from './gameTypes';
+import { SpellData, MoveData, ActionData, RespawnData, MoveBroadcastData, AttackData } from './gameTypes';
 import { PlayerService } from './playerService';
 import { EnemyService } from './enemyService';
 import { DungeonService } from './dungeonService';
-import { isPlayerHitBySpell, isEnemyHitBySpell, calculateDistance, createSafePlayerData } from './gameUtils';
+import { isPlayerHitBySpell, isEnemyHitBySpell, isPlayerHitByAttack, isEnemyHitByAttack, calculateDistance, createSafePlayerData } from './gameUtils';
 import { broadcastToFloor, broadcastToFloorExcluding, floorClients } from './floorManager';
 
 // Rate limiting for movement updates
@@ -200,18 +200,24 @@ export async function handlePlayerAction(
     return;
   }
 
-  // Handle different player actions (attack, interact, etc.)
-  console.log(`[PLAYER ACTION DEBUG] Player action from ${clientId}:`, JSON.stringify(data, null, 2));
-  
   // Special handling for spell_cast actions
   if (data.action === 'spell_cast' && data.data) {
-    console.log(`[PLAYER ACTION DEBUG] Detected spell_cast action, calling handleSpellCast`);
     // Type guard for spell data
     const spellData = data.data as unknown as SpellData;
     if (spellData.fromPosition && spellData.toPosition && spellData.spellRadius) {
       await handleSpellCast(clientId, spellData, clients, gameState, playerService, enemyService);
     } else {
       console.log(`[PLAYER ACTION DEBUG] Invalid spell data structure`);
+    }
+  }
+  // Special handling for attack actions
+  else if (['punch_attack', 'melee_attack', 'range_attack'].includes(data.action) && data.data) {
+    // Type guard for attack data
+    const attackData = data.data as unknown as AttackData;
+    if (attackData.fromPosition && attackData.toPosition && attackData.range) {
+      await handleAttack(clientId, data.action, attackData, clients, gameState, playerService, enemyService);
+    } else {
+      console.log(`[PLAYER ACTION DEBUG] Invalid attack data structure for ${data.action}`);
     }
   } else {
     console.log(`[PLAYER ACTION DEBUG] Action type: ${data.action}, has data: ${!!data.data}`);
@@ -657,4 +663,291 @@ export async function handleSpellCast(
   
   // Log overall results
   console.log(`[SPELL HIT DEBUG] Spell cast complete. Players hit: ${playersHit.length}, Enemies hit: ${enemiesHit.length}`);
+}
+
+/**
+ * Check players for attack hits
+ */
+async function checkPlayersForAttackHit(
+  attackerClientId: string, 
+  currentFloor: string, 
+  attackData: AttackData, 
+  clients: Map<string, WebSocketClient>,
+  gameState: GameState,
+  playerService: PlayerService
+): Promise<string[]> {
+  const floorClientIds = floorClients.get(currentFloor);
+  const playersHitDetected: string[] = [];
+  let playersChecked = 0;
+  
+  if (!floorClientIds) {
+    console.log(`[ATTACK HIT DEBUG] No clients found on floor ${currentFloor}`);
+    return playersHitDetected;
+  }
+
+  const attackerClient = clients.get(attackerClientId);
+  if (!attackerClient) {
+    console.log(`[ATTACK HIT DEBUG] Attacker client not found: ${attackerClientId}`);
+    return playersHitDetected;
+  }
+
+  // Check each player on the same floor for attack hits
+  for (const targetClientId of floorClientIds) {
+    // Skip the attacker
+    if (targetClientId === attackerClientId) {
+      console.log(`[ATTACK HIT DEBUG] Skipping attacker client ${targetClientId}`);
+      continue;
+    }
+    
+    const targetClient = clients.get(targetClientId);
+    if (!targetClient || !targetClient.playerId || !targetClient.userId) {
+      console.log(`[ATTACK HIT DEBUG] Target client ${targetClientId} missing required data:`, {
+        hasClient: !!targetClient,
+        playerId: targetClient?.playerId,
+        userId: targetClient?.userId
+      });
+      continue;
+    }
+    
+    // Get fresh player data from database to ensure we have the latest position
+    let targetPlayer;
+    try {
+      targetPlayer = await playerService.getPlayer(targetClient.userId);
+      if (!targetPlayer) {
+        console.log(`[ATTACK HIT DEBUG] Could not find player in database for userId: ${targetClient.userId}`);
+        continue;
+      }
+    } catch (error) {
+      console.error(`[ATTACK HIT DEBUG] Error fetching player from database:`, error);
+      continue;
+    }
+    
+    if (!targetPlayer.isAlive) {
+      console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} is already dead, skipping`);
+      continue;
+    }
+    
+    playersChecked++;
+    console.log(`[ATTACK HIT DEBUG] Checking player ${targetPlayer.username} (${targetPlayer.id}) at position (${targetPlayer.position.x}, ${targetPlayer.position.y}, ${targetPlayer.position.z})`);
+    
+    // Check if this player is hit by the attack
+    const isHit = isPlayerHitByAttack(targetPlayer.position, attackData);
+    console.log(`[ATTACK HIT DEBUG] Hit detection result for ${targetPlayer.username}: ${isHit}`);
+    
+    if (isHit) {
+      console.log(`[ATTACK HIT DEBUG] *** PLAYER HIT DETECTED *** ${targetPlayer.username} (${targetPlayer.id}) hit by attack!`);
+      playersHitDetected.push(targetPlayer.username);
+      
+      // Calculate damage (for now, fixed damage of 25, but this could be made configurable)
+      const damage = 25;
+      const newHealth = Math.max(0, targetPlayer.health - damage);
+      
+      try {
+        // Update health in database
+        await playerService.updatePlayerHealth(targetClient.userId, newHealth);
+        console.log(`[ATTACK HIT DEBUG] Updated ${targetPlayer.username} health in database: ${targetPlayer.health} -> ${newHealth}`);
+        
+        // Update game state
+        const gameStatePlayer = gameState.players.get(targetClient.playerId);
+        if (gameStatePlayer) {
+          gameStatePlayer.health = newHealth;
+          gameStatePlayer.lastUpdate = new Date();
+          
+          // Check if player died
+          if (newHealth <= 0) {
+            gameStatePlayer.isAlive = false;
+            console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} died from attack damage!`);
+          }
+        } else {
+          console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} not found in gameState, updating from fresh data`);
+          targetPlayer.health = newHealth;
+          if (newHealth <= 0) {
+            targetPlayer.isAlive = false;
+          }
+          gameState.players.set(targetClient.playerId, targetPlayer);
+        }
+        
+        // Send health update to the hit player
+        console.log(`[ATTACK HIT DEBUG] Sending health_update to ${targetPlayer.username}`);
+        sendMessage(targetClientId, {
+          type: 'health_update',
+          data: {
+            health: newHealth,
+            maxHealth: targetPlayer.maxHealth,
+            damage: damage,
+            damageCause: 'attack',
+            attackerPlayerId: attackerClient.playerId,
+            isAlive: newHealth > 0,
+          },
+        }, clients);
+        
+        // Broadcast the hit to all players on the floor
+        console.log(`[ATTACK HIT DEBUG] Broadcasting player_hit to all players on floor ${currentFloor}`);
+        broadcastToFloor(currentFloor, {
+          type: 'player_hit',
+          data: {
+            targetPlayerId: targetPlayer.id,
+            attackerPlayerId: attackerClient.playerId,
+            damage: damage,
+            newHealth: newHealth,
+            isAlive: newHealth > 0,
+            hitType: 'attack',
+          },
+        }, clients);
+        
+        console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} health updated: ${newHealth}/${targetPlayer.maxHealth}`);
+      } catch (error) {
+        console.error(`[ATTACK HIT DEBUG] Error updating health for player ${targetPlayer.id}:`, error);
+      }
+    } else {
+      // Log why the player wasn't hit for debugging
+      const distance = calculateDistance(targetPlayer.position, attackData.fromPosition);
+      console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} NOT hit. Distance from attack origin: ${distance.toFixed(2)}, attack range: ${attackData.range}`);
+    }
+  }
+  
+  console.log(`[ATTACK HIT DEBUG] Player attack hit detection complete. Players checked: ${playersChecked}, Players hit: ${playersHitDetected.length}`);
+  if (playersHitDetected.length > 0) {
+    console.log(`[ATTACK HIT DEBUG] Players hit: ${playersHitDetected.join(', ')}`);
+  }
+
+  return playersHitDetected;
+}
+
+/**
+ * Check enemies for attack hits
+ */
+async function checkEnemiesForAttackHit(
+  attackerClientId: string,
+  currentFloor: string,
+  attackData: AttackData,
+  clients: Map<string, WebSocketClient>,
+  enemyService: EnemyService
+): Promise<string[]> {
+  const enemiesHitDetected: string[] = [];
+  let enemiesChecked = 0;
+
+  const attackerClient = clients.get(attackerClientId);
+  if (!attackerClient) {
+    console.log(`[ATTACK HIT DEBUG] Attacker client not found: ${attackerClientId}`);
+    return enemiesHitDetected;
+  }
+
+  try {
+    // Get all enemies on this floor
+    const enemiesOnFloor = await enemyService.getEnemiesOnFloor(currentFloor);
+    console.log(`[ATTACK HIT DEBUG] Found ${enemiesOnFloor.length} enemies on floor ${currentFloor}`);
+
+    for (const enemy of enemiesOnFloor) {
+      enemiesChecked++;
+      console.log(`[ATTACK HIT DEBUG] Checking enemy ${enemy.id} (${enemy.enemyTypeName}) at position (${enemy.positionX}, ${enemy.positionY})`);
+
+      // Check if this enemy is hit by the attack
+      const enemyPosition = { x: enemy.positionX, y: enemy.positionY };
+      const isHit = isEnemyHitByAttack(enemyPosition, attackData);
+      console.log(`[ATTACK HIT DEBUG] Enemy hit detection result for ${enemy.enemyTypeName} (${enemy.id}): ${isHit}`);
+
+      if (isHit) {
+        console.log(`[ATTACK HIT DEBUG] *** ENEMY HIT DETECTED *** ${enemy.enemyTypeName} (${enemy.id}) hit by attack!`);
+        enemiesHitDetected.push(enemy.enemyTypeName);
+
+        // Calculate damage (same as player damage for now)
+        const damage = 25;
+        const newHealth = Math.max(0, enemy.health - damage);
+
+        try {
+          // Update enemy health and check if it died
+          const died = await enemyService.updateEnemyHealth(enemy.id, newHealth);
+          console.log(`[ATTACK HIT DEBUG] Updated enemy ${enemy.id} health: ${enemy.health} -> ${newHealth}, died: ${died}`);
+
+          // Broadcast enemy hit to all players on the floor
+          console.log(`[ATTACK HIT DEBUG] Broadcasting enemy_hit to all players on floor ${currentFloor}`);
+          broadcastToFloor(currentFloor, {
+            type: 'enemy_hit',
+            data: {
+              enemyId: enemy.id,
+              enemyTypeName: enemy.enemyTypeName,
+              attackerPlayerId: attackerClient.playerId,
+              damage: damage,
+              newHealth: newHealth,
+              died: died,
+              hitType: 'attack',
+            },
+          }, clients);
+
+          if (died) {
+            console.log(`[ATTACK HIT DEBUG] Enemy ${enemy.enemyTypeName} (${enemy.id}) was killed by attack!`);
+          }
+        } catch (error) {
+          console.error(`[ATTACK HIT DEBUG] Error updating health for enemy ${enemy.id}:`, error);
+        }
+      } else {
+        // Log why the enemy wasn't hit for debugging
+        const distance = calculateDistance({ x: enemy.positionX, y: 6, z: enemy.positionY }, attackData.fromPosition);
+        console.log(`[ATTACK HIT DEBUG] Enemy ${enemy.enemyTypeName} NOT hit. Distance from attack origin: ${distance.toFixed(2)}, attack range: ${attackData.range}`);
+      }
+    }
+
+    console.log(`[ATTACK HIT DEBUG] Enemy attack hit detection complete. Enemies checked: ${enemiesChecked}, Enemies hit: ${enemiesHitDetected.length}`);
+    if (enemiesHitDetected.length > 0) {
+      console.log(`[ATTACK HIT DEBUG] Enemies hit: ${enemiesHitDetected.join(', ')}`);
+    }
+  } catch (error) {
+    console.error(`[ATTACK HIT DEBUG] Error checking enemies for attack hits:`, error);
+  }
+
+  return enemiesHitDetected;
+}
+
+/**
+ * Handle attack actions (punch, melee, ranged)
+ */
+export async function handleAttack(
+  attackerClientId: string,
+  attackType: string,
+  attackData: AttackData,
+  clients: Map<string, WebSocketClient>,
+  gameState: GameState,
+  playerService: PlayerService,
+  enemyService: EnemyService
+): Promise<void> {
+  const attackerClient = clients.get(attackerClientId);
+  if (!attackerClient || !attackerClient.currentDungeonDagNodeName) {
+    console.log(`[ATTACK HIT DEBUG] Attacker client not found or not on a floor. ClientId: ${attackerClientId}`);
+    return;
+  }
+  
+  const currentFloor = attackerClient.currentDungeonDagNodeName;
+  const floorClientIds = floorClients.get(currentFloor);
+  
+  if (!floorClientIds) {
+    console.log(`[ATTACK HIT DEBUG] No clients found on floor ${currentFloor}`);
+    return;
+  }
+  
+  console.log(`[ATTACK HIT DEBUG] Processing ${attackType} from player ${attackerClient.playerId} on floor ${currentFloor}`);
+  console.log(`[ATTACK HIT DEBUG] Attack data:`, JSON.stringify(attackData, null, 2));
+  console.log(`[ATTACK HIT DEBUG] Players on floor: ${Array.from(floorClientIds).length}`);
+  
+  // Validate attack data
+  const { fromPosition, toPosition, range } = attackData;
+  if (!fromPosition || !toPosition || !range) {
+    console.log(`[ATTACK HIT DEBUG] Invalid attack data - missing required fields:`, {
+      hasFromPosition: !!fromPosition,
+      hasToPosition: !!toPosition,
+      hasRange: !!range
+    });
+    return;
+  }
+  
+  console.log(`[ATTACK HIT DEBUG] Attack: from (${fromPosition.x}, ${fromPosition.y}, ${fromPosition.z}) to (${toPosition.x}, ${toPosition.y}, ${toPosition.z}) with range ${range}`);
+  
+  // Check players for attack hits
+  const playersHit = await checkPlayersForAttackHit(attackerClientId, currentFloor, attackData, clients, gameState, playerService);
+  
+  // Check enemies for attack hits
+  const enemiesHit = await checkEnemiesForAttackHit(attackerClientId, currentFloor, attackData, clients, enemyService);
+  
+  // Log overall results
+  console.log(`[ATTACK HIT DEBUG] ${attackType} complete. Players hit: ${playersHit.length}, Enemies hit: ${enemiesHit.length}`);
 }
