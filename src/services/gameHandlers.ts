@@ -539,43 +539,44 @@ async function checkEnemiesForSpellHit(
   }
 
   try {
-    // Get all enemies on this floor
-    const enemiesOnFloor = await enemyService.getEnemiesOnFloor(currentFloor);
-    console.log(`[SPELL HIT DEBUG] Found ${enemiesOnFloor.length} enemies on floor ${currentFloor}`);
+    // Get all active enemy instances on this floor (in-memory)
+    const activeEnemiesOnFloor = enemyService.getActiveEnemiesOnFloor(currentFloor);
+    console.log(`[SPELL HIT DEBUG] Found ${activeEnemiesOnFloor.length} active enemies on floor ${currentFloor}`);
 
-    for (const enemy of enemiesOnFloor) {
+    for (const enemyInstance of activeEnemiesOnFloor) {
+      const enemyData = enemyInstance.getData();
       enemiesChecked++;
-      console.log(`[SPELL HIT DEBUG] Checking enemy ${enemy.id} (${enemy.enemyTypeName}) at position (${enemy.positionX}, ${enemy.positionY})`);
+      console.log(`[SPELL HIT DEBUG] Checking enemy ${enemyData.id} (${enemyData.enemyTypeName}) at position (${enemyData.positionX}, ${enemyData.positionY})`);
 
-      // Check if this enemy is hit by the spell
-      const enemyPosition = { x: enemy.positionX, y: enemy.positionY };
-      const adjustedSpellData: SpellData = { 
-        ...spellData, 
+      // Check if this enemy is hit by the spell using in-memory collision detection
+      const adjustedSpellData = { 
+        fromPosition: spellData.fromPosition,
+        toPosition: spellData.toPosition,
         spellRadius: adjustedSpellRadius 
       };
-      const isHit = isEnemyHitBySpell(enemyPosition, adjustedSpellData);
-      console.log(`[SPELL HIT DEBUG] Enemy hit detection result for ${enemy.enemyTypeName} (${enemy.id}): ${isHit}`);
+      const isHit = enemyInstance.checkForSpellDamage(adjustedSpellData);
+      console.log(`[SPELL HIT DEBUG] Enemy hit detection result for ${enemyData.enemyTypeName} (${enemyData.id}): ${isHit}`);
 
       if (isHit) {
-        console.log(`[SPELL HIT DEBUG] *** ENEMY HIT DETECTED *** ${enemy.enemyTypeName} (${enemy.id}) hit by spell!`);
-        enemiesHitDetected.push(enemy.enemyTypeName);
+        console.log(`[SPELL HIT DEBUG] *** ENEMY HIT DETECTED *** ${enemyData.enemyTypeName} (${enemyData.id}) hit by spell!`);
+        enemiesHitDetected.push(enemyData.enemyTypeName);
 
         // Calculate damage (same as player damage for now)
         const damage = 20;
-        const newHealth = Math.max(0, enemy.health - damage);
+        const newHealth = Math.max(0, enemyData.health - damage);
 
         try {
-          // Update enemy health and check if it died
-          const died = await enemyService.updateEnemyHealth(enemy.id, newHealth);
-          console.log(`[SPELL HIT DEBUG] Updated enemy ${enemy.id} health: ${enemy.health} -> ${newHealth}, died: ${died}`);
+          // Update enemy health using the in-memory method
+          const died = await enemyInstance.updateHealth(newHealth);
+          console.log(`[SPELL HIT DEBUG] Updated enemy ${enemyData.id} health: ${enemyData.health} -> ${newHealth}, died: ${died}`);
 
           // Broadcast enemy hit to all players on the floor
           console.log(`[SPELL HIT DEBUG] Broadcasting enemy_hit to all players on floor ${currentFloor}`);
           broadcastToFloor(currentFloor, {
             type: 'enemy_hit',
             data: {
-              enemyId: enemy.id,
-              enemyTypeName: enemy.enemyTypeName,
+              enemyId: enemyData.id,
+              enemyTypeName: enemyData.enemyTypeName,
               casterPlayerId: casterClient.playerId,
               damage: damage,
               newHealth: newHealth,
@@ -585,15 +586,18 @@ async function checkEnemiesForSpellHit(
           }, clients);
 
           if (died) {
-            console.log(`[SPELL HIT DEBUG] Enemy ${enemy.enemyTypeName} (${enemy.id}) was killed by spell!`);
+            console.log(`[SPELL HIT DEBUG] Enemy ${enemyData.enemyTypeName} (${enemyData.id}) was killed by spell!`);
           }
         } catch (error) {
-          console.error(`[SPELL HIT DEBUG] Error updating health for enemy ${enemy.id}:`, error);
+          console.error(`[SPELL HIT DEBUG] Error updating health for enemy ${enemyData.id}:`, error);
         }
       } else {
         // Log why the enemy wasn't hit for debugging
-        const distance = calculateDistance({ x: enemy.positionX, y: 6, z: enemy.positionY }, spellData.fromPosition);
-        console.log(`[SPELL HIT DEBUG] Enemy ${enemy.enemyTypeName} NOT hit. Distance from spell origin: ${distance.toFixed(2)}, adjusted spell radius: ${adjustedSpellRadius}`);
+        const distance = Math.sqrt(
+          Math.pow(enemyData.positionX - spellData.fromPosition.x, 2) + 
+          Math.pow(enemyData.positionY - spellData.fromPosition.z, 2)
+        );
+        console.log(`[SPELL HIT DEBUG] Enemy ${enemyData.enemyTypeName} NOT hit. Distance from spell origin: ${distance.toFixed(2)}, adjusted spell radius: ${adjustedSpellRadius}`);
       }
     }
 
@@ -834,39 +838,39 @@ async function checkEnemiesForAttackHit(
   }
 
   try {
-    // Get all enemies on this floor
-    const enemiesOnFloor = await enemyService.getEnemiesOnFloor(currentFloor);
-    console.log(`[ATTACK HIT DEBUG] Found ${enemiesOnFloor.length} enemies on floor ${currentFloor}`);
+    // Get all active enemy instances on this floor (in-memory)
+    const activeEnemiesOnFloor = enemyService.getActiveEnemiesOnFloor(currentFloor);
+    console.log(`[ATTACK HIT DEBUG] Found ${activeEnemiesOnFloor.length} active enemies on floor ${currentFloor}`);
 
-    for (const enemy of enemiesOnFloor) {
+    for (const enemyInstance of activeEnemiesOnFloor) {
+      const enemyData = enemyInstance.getData();
       enemiesChecked++;
-      console.log(`[ATTACK HIT DEBUG] Checking enemy ${enemy.id} (${enemy.enemyTypeName}) at position (${enemy.positionX}, ${enemy.positionY})`);
+      console.log(`[ATTACK HIT DEBUG] Checking enemy ${enemyData.id} (${enemyData.enemyTypeName}) at position (${enemyData.positionX}, ${enemyData.positionY})`);
 
-      // Check if this enemy is hit by the attack
-      const enemyPosition = { x: enemy.positionX, y: enemy.positionY };
-      const isHit = isEnemyHitByAttack(enemyPosition, attackData);
-      console.log(`[ATTACK HIT DEBUG] Enemy hit detection result for ${enemy.enemyTypeName} (${enemy.id}): ${isHit}`);
+      // Check if this enemy is hit by the attack using in-memory collision detection
+      const isHit = enemyInstance.checkForDamage(attackData);
+      console.log(`[ATTACK HIT DEBUG] Enemy hit detection result for ${enemyData.enemyTypeName} (${enemyData.id}): ${isHit}`);
 
       if (isHit) {
-        console.log(`[ATTACK HIT DEBUG] *** ENEMY HIT DETECTED *** ${enemy.enemyTypeName} (${enemy.id}) hit by attack!`);
-        enemiesHitDetected.push(enemy.enemyTypeName);
+        console.log(`[ATTACK HIT DEBUG] *** ENEMY HIT DETECTED *** ${enemyData.enemyTypeName} (${enemyData.id}) hit by attack!`);
+        enemiesHitDetected.push(enemyData.enemyTypeName);
 
         // Calculate damage (same as player damage for now)
         const damage = 25;
-        const newHealth = Math.max(0, enemy.health - damage);
+        const newHealth = Math.max(0, enemyData.health - damage);
 
         try {
-          // Update enemy health and check if it died
-          const died = await enemyService.updateEnemyHealth(enemy.id, newHealth);
-          console.log(`[ATTACK HIT DEBUG] Updated enemy ${enemy.id} health: ${enemy.health} -> ${newHealth}, died: ${died}`);
+          // Update enemy health using the in-memory method
+          const died = await enemyInstance.updateHealth(newHealth);
+          console.log(`[ATTACK HIT DEBUG] Updated enemy ${enemyData.id} health: ${enemyData.health} -> ${newHealth}, died: ${died}`);
 
           // Broadcast enemy hit to all players on the floor
           console.log(`[ATTACK HIT DEBUG] Broadcasting enemy_hit to all players on floor ${currentFloor}`);
           broadcastToFloor(currentFloor, {
             type: 'enemy_hit',
             data: {
-              enemyId: enemy.id,
-              enemyTypeName: enemy.enemyTypeName,
+              enemyId: enemyData.id,
+              enemyTypeName: enemyData.enemyTypeName,
               attackerPlayerId: attackerClient.playerId,
               damage: damage,
               newHealth: newHealth,
@@ -876,15 +880,19 @@ async function checkEnemiesForAttackHit(
           }, clients);
 
           if (died) {
-            console.log(`[ATTACK HIT DEBUG] Enemy ${enemy.enemyTypeName} (${enemy.id}) was killed by attack!`);
+            console.log(`[ATTACK HIT DEBUG] Enemy ${enemyData.enemyTypeName} (${enemyData.id}) was killed by attack!`);
           }
         } catch (error) {
-          console.error(`[ATTACK HIT DEBUG] Error updating health for enemy ${enemy.id}:`, error);
+          console.error(`[ATTACK HIT DEBUG] Error updating health for enemy ${enemyData.id}:`, error);
         }
       } else {
         // Log why the enemy wasn't hit for debugging
-        const distance = calculateDistance({ x: enemy.positionX, y: 6, z: enemy.positionY }, attackData.fromPosition);
-        console.log(`[ATTACK HIT DEBUG] Enemy ${enemy.enemyTypeName} NOT hit. Distance from attack origin: ${distance.toFixed(2)}, attack range: ${attackData.range}`);
+        const distance = Math.sqrt(
+          Math.pow(enemyData.positionX - attackData.fromPosition.x, 2) + 
+          Math.pow(6 - attackData.fromPosition.y, 2) + 
+          Math.pow(enemyData.positionY - attackData.fromPosition.z, 2)
+        );
+        console.log(`[ATTACK HIT DEBUG] Enemy ${enemyData.enemyTypeName} NOT hit. Distance from attack origin: ${distance.toFixed(2)}, attack range: ${attackData.range}`);
       }
     }
 

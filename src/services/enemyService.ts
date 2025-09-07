@@ -182,10 +182,12 @@ export class EnemyService {
   }
 
   /**
-   * Update enemy health and handle death
+   * Update enemy health and handle death (DEPRECATED - use Enemy.updateHealth instead)
+   * This method is kept for backward compatibility but should be replaced with direct Enemy instance calls
    */
   async updateEnemyHealth(enemyId: string, newHealth: number): Promise<boolean> {
-    console.log(`[ENEMY SERVICE DEBUG] updateEnemyHealth called for enemy ${enemyId} with newHealth: ${newHealth}`);
+    console.log(`[ENEMY SERVICE DEBUG] updateEnemyHealth called for enemy ${enemyId} with newHealth: ${newHealth} (DEPRECATED)`);
+    console.warn(`[ENEMY SERVICE] updateEnemyHealth is deprecated. Use Enemy.updateHealth() directly instead.`);
     
     const enemyInstance = this.activeEnemies.get(enemyId);
     if (!enemyInstance) {
@@ -196,8 +198,8 @@ export class EnemyService {
     }
     
     console.log(`[ENEMY SERVICE DEBUG] Found enemy instance for ${enemyId}, calling updateHealth...`);
-    await enemyInstance.updateHealth(newHealth);
-    return true;
+    const died = await enemyInstance.updateHealth(newHealth);
+    return died;
   }
 
   /**
@@ -205,6 +207,23 @@ export class EnemyService {
    */
   getActiveEnemy(enemyId: string): Enemy | undefined {
     return this.activeEnemies.get(enemyId);
+  }
+
+  /**
+   * Get all active enemy instances on a specific floor (for collision checking)
+   */
+  getActiveEnemiesOnFloor(floorName: string): Enemy[] {
+    const enemiesOnFloor: Enemy[] = [];
+    
+    for (const enemy of this.activeEnemies.values()) {
+      const enemyData = enemy.getData();
+      if (enemyData.floorName === floorName && !enemy.isDespawnedState()) {
+        enemiesOnFloor.push(enemy);
+      }
+    }
+    
+    console.log(`[ENEMY SERVICE] Found ${enemiesOnFloor.length} active enemies on floor ${floorName}`);
+    return enemiesOnFloor;
   }
 
   /**
