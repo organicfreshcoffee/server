@@ -48,3 +48,9 @@ export interface AttackData {
   range: number;
   timestamp: number;
 }
+
+export interface HealthUpdateData {
+  playerId: string; // Firebase userId sent by client (validated against authenticated user)
+  health: number;
+  maxHealth: number;
+}
