@@ -1,6 +1,8 @@
 import { broadcastToFloor } from './floorManager';
 import { clients } from './websocket';
 import { calculateDistance } from './gameUtils';
+import { getDatabase } from '../config/database';
+import { ItemService } from './itemService';
 
 export interface EnemyData {
   id: string;
@@ -24,6 +26,7 @@ export class Enemy {
   private isDespawned = false;
   private onDespawnCallback?: (enemyId: string) => void;
   private floorTiles: Array<{ x: number; y: number }>;
+  private itemService: ItemService;
   private destinationX: number | null = null;
   private destinationY: number | null = null;
   private isMovingToDestination = false;
@@ -32,11 +35,13 @@ export class Enemy {
   constructor(
     private enemyData: EnemyData, 
     floorTiles: Array<{ x: number; y: number }>,
+    itemService: ItemService,
     onDespawn?: (enemyId: string) => void
   ) {
     this.startTime = Date.now();
     this.onDespawnCallback = onDespawn;
     this.floorTiles = floorTiles;
+    this.itemService = itemService;
   }
 
   /**
@@ -403,6 +408,71 @@ export class Enemy {
   }
 
   /**
+   * Handle loot drops when enemy dies from damage
+   */
+  private async handleLootDrops(): Promise<void> {
+    try {
+      console.log(`[LOOT] Processing loot drops for enemy ${this.enemyData.id} (${this.enemyData.enemyTypeName})`);
+      
+      const db = getDatabase();
+      
+      // Query loot table for this enemy type
+      const lootEntries = await db.collection('loot').find({ 
+        enemyTypeName: this.enemyData.enemyTypeName 
+      }).toArray();
+      
+      if (lootEntries.length === 0) {
+        console.log(`[LOOT] No loot entries found for enemy type: ${this.enemyData.enemyTypeName}`);
+        return;
+      }
+      
+      console.log(`[LOOT] Found ${lootEntries.length} potential loot drops for ${this.enemyData.enemyTypeName}`);
+      
+      // Convert world coordinates back to tile coordinates for item spawning
+      const tileX = Math.round(this.enemyData.positionX / 5);
+      const tileY = Math.round(this.enemyData.positionY / 5);
+      
+      // Process each potential loot drop
+      for (const lootEntry of lootEntries) {
+        const randomRoll = Math.random();
+        console.log(`[LOOT] Rolling for ${lootEntry.itemTypeName}: ${randomRoll} vs ${lootEntry.dropPercentage}`);
+        
+        if (randomRoll < lootEntry.dropPercentage) {
+          console.log(`[LOOT] Drop success! Spawning ${lootEntry.itemTypeName}`);
+          
+          // Get the item template for this item type
+          const itemTemplate = await db.collection('itemTemplates').findOne({ 
+            name: lootEntry.itemTypeName 
+          });
+          
+          if (itemTemplate) {
+            // Create the item at the enemy's position
+            await this.itemService.createItem(
+              this.enemyData.floorName,
+              tileX,
+              tileY,
+              {
+                _id: itemTemplate._id.toString(),
+                category: itemTemplate.category,
+                name: itemTemplate.name,
+                possibleMaterials: itemTemplate.possibleMaterials
+              },
+              this.floorTiles
+            );
+            
+            console.log(`[LOOT] Successfully spawned ${lootEntry.itemTypeName} at position (${tileX}, ${tileY})`);
+          } else {
+            console.warn(`[LOOT] Item template not found for: ${lootEntry.itemTypeName}`);
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error(`[LOOT] Error processing loot drops for enemy ${this.enemyData.id}:`, error);
+    }
+  }
+
+  /**
    * Update enemy health and handle death - works with in-memory data
    */
   async updateHealth(newHealth: number): Promise<boolean> {
@@ -425,6 +495,10 @@ export class Enemy {
       // Check if enemy died
       if (clampedHealth <= 0) {
         console.log(`Enemy ${this.enemyData.id} died from damage!`);
+        
+        // Handle loot drops before despawning
+        await this.handleLootDrops();
+        
         // call delete to de-spawn
         await this.delete();
         return true;

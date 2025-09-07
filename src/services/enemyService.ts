@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { broadcastToFloor } from './floorManager';
 import { clients } from './websocket';
 import { Enemy, EnemyData } from './enemy';
+import { ItemService } from './itemService';
 
 // Re-export the interface for backward compatibility
 export type EnemyInterface = EnemyData;
@@ -16,9 +17,10 @@ export interface EnemyType {
 export class EnemyService {
   private readonly CUBE_SIZE = 5;
   private activeEnemies: Map<string, Enemy> = new Map(); // Track active enemy instances
+  private itemService: ItemService;
 
-  constructor() {
-    // Service manages enemy instances
+  constructor(itemService: ItemService) {
+    this.itemService = itemService;
   }
 
   /**
@@ -121,7 +123,7 @@ export class EnemyService {
     console.log(`Creating in-memory enemy ${enemyData.enemyTypeName} with ID ${enemyData.id} on floor ${floorName}`);
     
     // Create and initialize the enemy instance
-    const enemy = new Enemy(enemyData, floorTiles, (enemyId) => {
+    const enemy = new Enemy(enemyData, floorTiles, this.itemService, (enemyId) => {
       // Callback to remove from active enemies when despawned
       this.removeActiveEnemy(enemyId);
     });
