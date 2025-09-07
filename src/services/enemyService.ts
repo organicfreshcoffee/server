@@ -22,53 +22,42 @@ export class EnemyService {
   }
 
   /**
-   * Check if there are enemies on a floor
+   * Check if there are enemies on a floor (in-memory)
    */
   async hasEnemiesOnFloor(floorName: string): Promise<boolean> {
-    const db = getDatabase();
-    const count = await db.collection('enemies').countDocuments({ floorName });
-    return count > 0;
+    // Check active enemies in memory instead of database
+    for (const enemy of this.activeEnemies.values()) {
+      const enemyData = enemy.getData();
+      if (enemyData.floorName === floorName && !enemy.isDespawnedState()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
-   * Get enemy counts by floor (only returns floors with enemies)
+   * Get enemy counts by floor (only returns floors with enemies) - in-memory
    */
   async getEnemyCountsByFloor(): Promise<{ totalEnemies: number; enemiesByFloor: Record<string, number> }> {
-    const db = getDatabase();
-    
-    // Aggregate enemies by floor using MongoDB aggregation
-    const enemyCountsByFloor = await db.collection('enemies').aggregate([
-      {
-        $group: {
-          _id: '$floorName',
-          count: { $sum: 1 }
-        }
-      },
-      {
-        $project: {
-          _id: 0,
-          floorName: '$_id',
-          enemyCount: '$count'
-        }
-      }
-    ]).toArray();
-
-    // Convert to key-value pairs for easier consumption
     const enemiesByFloor: Record<string, number> = {};
     let totalEnemies = 0;
-
-    enemyCountsByFloor.forEach(floor => {
-      enemiesByFloor[floor.floorName] = floor.enemyCount;
-      totalEnemies += floor.enemyCount;
-    });
-
+    
+    // Count active enemies in memory by floor
+    for (const enemy of this.activeEnemies.values()) {
+      if (!enemy.isDespawnedState()) {
+        const enemyData = enemy.getData();
+        const floorName = enemyData.floorName;
+        
+        enemiesByFloor[floorName] = (enemiesByFloor[floorName] || 0) + 1;
+        totalEnemies++;
+      }
+    }
+    
     return {
       totalEnemies,
       enemiesByFloor
     };
-  }
-
-  /**
+  }  /**
    * Get all enemy types from the database
    */
   async getEnemyTypes(): Promise<EnemyType[]> {
@@ -113,8 +102,6 @@ export class EnemyService {
     enemyType: EnemyType,
     floorTiles: Array<{ x: number; y: number }>
   ): Promise<EnemyData> {
-    const db = getDatabase();
-    
     const { worldX, worldY } = this.tileToWorldCoordinates(tileX, tileY);
     
     const enemyData: EnemyData = {
@@ -130,12 +117,12 @@ export class EnemyService {
       createdDatetime: new Date()
     };
 
-    await db.collection('enemies').insertOne(enemyData);
+    // No longer storing in database - enemies are now fully in-memory
+    console.log(`Creating in-memory enemy ${enemyData.enemyTypeName} with ID ${enemyData.id} on floor ${floorName}`);
     
     // Create and initialize the enemy instance
     const enemy = new Enemy(enemyData, floorTiles, (enemyId) => {
       // Callback to remove from active enemies when despawned
-      // TODO: callback to delete just calls delete again
       this.removeActiveEnemy(enemyId);
     });
     this.activeEnemies.set(enemyData.id, enemy);
@@ -227,23 +214,22 @@ export class EnemyService {
   }
 
   /**
-   * Get all enemies on a specific floor
+   * Get all enemies on a specific floor (in-memory)
    */
   async getEnemiesOnFloor(floorName: string): Promise<EnemyData[]> {
-    const db = getDatabase();
-    const enemies = await db.collection('enemies').find({ floorName }).toArray();
-    return enemies.map(enemy => ({
-      id: enemy.id,
-      enemyTypeID: enemy.enemyTypeID,
-      enemyTypeName: enemy.enemyTypeName,
-      positionX: enemy.positionX,
-      positionY: enemy.positionY,
-      rotationY: enemy.rotationY,
-      floorName: enemy.floorName,
-      isMoving: enemy.isMoving,
-      health: enemy.health,
-      createdDatetime: enemy.createdDatetime
-    }));
+    const enemiesOnFloor: EnemyData[] = [];
+    
+    // Get active enemies from memory instead of database
+    for (const enemy of this.activeEnemies.values()) {
+      if (!enemy.isDespawnedState()) {
+        const enemyData = enemy.getData();
+        if (enemyData.floorName === floorName) {
+          enemiesOnFloor.push(enemyData);
+        }
+      }
+    }
+    
+    return enemiesOnFloor;
   }
 
   /**

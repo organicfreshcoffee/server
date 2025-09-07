@@ -1,4 +1,3 @@
-import { getDatabase } from '../config/database';
 import { broadcastToFloor } from './floorManager';
 import { clients } from './websocket';
 import { calculateDistance } from './gameUtils';
@@ -20,7 +19,6 @@ export class Enemy {
   private readonly CUBE_SIZE = 5;
   private readonly ENEMY_LIFETIME_MS = 5 * 60 * 1000; // 5 minutes
   private readonly MOVEMENT_SPEED = 0.1; // Units per tick
-  private readonly DB_UPDATE_INTERVAL = 5; // Update database every 5 ticks
   private ticker: NodeJS.Timeout | null = null;
   private startTime: number;
   private isDespawned = false;
@@ -90,16 +88,6 @@ export class Enemy {
   private async move(): Promise<void> {
     try {
       this.tickCounter++;
-      
-      // Check if enemy still exists in database every 5 ticks
-      if (this.tickCounter % this.DB_UPDATE_INTERVAL === 0) {
-        const db = getDatabase();
-        const currentEnemy = await db.collection('enemies').findOne({ id: this.enemyData.id });
-        if (!currentEnemy) {
-          this.delete(); // Enemy was deleted externally
-          return;
-        }
-      }
 
       // Convert current position to tile coordinates
       const currentTileX = Math.round(this.enemyData.positionX / this.CUBE_SIZE);
@@ -113,23 +101,6 @@ export class Enemy {
       // Move towards destination if we have one
       if (this.destinationX !== null && this.destinationY !== null) {
         this.moveTowardsDestination();
-        
-        // Update in database only every 5 ticks to reduce DB usage
-        if (this.tickCounter % this.DB_UPDATE_INTERVAL === 0) {
-          const db = getDatabase();
-          await db.collection('enemies').updateOne(
-            { id: this.enemyData.id },
-            { 
-              $set: { 
-                positionX: this.enemyData.positionX, 
-                positionY: this.enemyData.positionY, 
-                rotationY: this.enemyData.rotationY,
-                isMoving: this.isMovingToDestination,
-                health: this.enemyData.health
-              }
-            }
-          );
-        }
       }
       
       // Broadcast this enemy's movement to all clients on the floor (includes health)
@@ -475,11 +446,6 @@ export class Enemy {
     }
 
     try {
-      const db = getDatabase();
-      
-      // Delete from database
-      await db.collection('enemies').deleteOne({ id: this.enemyData.id });
-      
       // Send despawn message to clients
       broadcastToFloor(this.enemyData.floorName, {
         type: 'enemy-despawned',
@@ -489,7 +455,7 @@ export class Enemy {
         }
       }, clients);
       
-      console.log(`Enemy ${this.enemyData.id} despawned after ${this.ENEMY_LIFETIME_MS / 1000} seconds`);
+      console.log(`Enemy ${this.enemyData.id} despawned after ${this.ENEMY_LIFETIME_MS / 1000} seconds (in-memory only)`);
       
     } catch (error) {
       console.error(`Error despawning enemy ${this.enemyData.id}:`, error);
