@@ -6,7 +6,7 @@ import { AuthService } from './authService';
 import { PlayerService } from './playerService';
 import { DungeonService } from './dungeonService';
 import { GameMessage, WebSocketClient, GameState, Player } from '../types/game';
-import { MoveData, ActionData, RespawnData } from './gameTypes';
+import { MoveData, ActionData, RespawnData, HealthUpdateData } from './gameTypes';
 import { createSafePlayerData } from './gameUtils';
 import { traceWebSocketOperation, traceWebSocketMessage, addSpanAttributes, addPayloadInfo } from '../config/tracing';
 import { 
@@ -183,6 +183,10 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
           await handlePlayerRespawn(clientId, message.data as unknown as RespawnData, clients, gameState, playerService, dungeonService);
           break;
 
+        case 'health_update':
+          await handleHealthUpdate(clientId, message.data as unknown as HealthUpdateData);
+          break;
+
         case 'ping':
           handlePing(clientId);
           break;
@@ -303,6 +307,57 @@ function handlePing(clientId: string): void {
       type: 'pong',
       data: { timestamp: new Date() },
     });
+  }
+}
+
+async function handleHealthUpdate(clientId: string, data: HealthUpdateData): Promise<void> {
+  const client = clients.get(clientId);
+  if (!client || !client.isAuthenticated || !client.userId) {
+    sendErrorMessageLocal(clientId, 'Not authenticated');
+    return;
+  }
+
+  // Validate the health update data
+  if (typeof data.health !== 'number' || typeof data.maxHealth !== 'number') {
+    sendErrorMessageLocal(clientId, 'Invalid health data');
+    return;
+  }
+
+  // Ensure health values are non-negative and health doesn't exceed maxHealth
+  const health = Math.max(0, Math.min(data.health, data.maxHealth));
+  const maxHealth = Math.max(1, data.maxHealth); // Ensure maxHealth is at least 1
+
+  try {
+    // Update the player's health and maxHealth in the database
+    await playerService.updatePlayerHealthAndMaxHealth(client.userId, health, maxHealth);
+    
+    console.log(`Updated health for player ${client.userId}: ${health}/${maxHealth}`);
+    
+    // Optionally broadcast the health update to other players on the same floor
+    // This can help with game state synchronization
+    if (client.playerId) {
+      const player = gameState.players.get(client.playerId);
+      if (player) {
+        player.health = health;
+        player.maxHealth = maxHealth;
+        
+        // Broadcast to other players on the same floor (excluding the sender)
+        if (player.currentDungeonDagNodeName) {
+          broadcastToFloorExcluding(player.currentDungeonDagNodeName, clientId, {
+            type: 'player_health_update',
+            data: {
+              playerId: client.playerId,
+              health: health,
+              maxHealth: maxHealth
+            }
+          }, clients);
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.error(`Error updating health for player ${client.userId}:`, error);
+    sendErrorMessageLocal(clientId, 'Failed to update health');
   }
 }
 

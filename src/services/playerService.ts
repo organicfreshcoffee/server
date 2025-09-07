@@ -184,6 +184,27 @@ export class PlayerService {
     );
   }
 
+  async updatePlayerHealthAndMaxHealth(userId: string, health: number, maxHealth: number): Promise<void> {
+    const db = getDatabase();
+    
+    // Ensure maxHealth is at least 1
+    const clampedMaxHealth = Math.max(1, maxHealth);
+    const clampedHealth = Math.max(0, Math.min(health, clampedMaxHealth));
+    const isAlive = clampedHealth > 0;
+    
+    await db.collection(this.collection).updateOne(
+      { userId },
+      {
+        $set: {
+          health: clampedHealth,
+          maxHealth: clampedMaxHealth,
+          isAlive: isAlive,
+          lastUpdate: new Date(),
+        },
+      }
+    );
+  }
+
   async setPlayerOnlineStatus(userId: string, isOnline: boolean): Promise<void> {
     const db = getDatabase();
     
