@@ -4,7 +4,7 @@ import { SpellData, MoveData, ActionData, RespawnData, MoveBroadcastData, Attack
 import { PlayerService } from './playerService';
 import { EnemyService } from './enemyService';
 import { DungeonService } from './dungeonService';
-import { isPlayerHitBySpell, isEnemyHitBySpell, isPlayerHitByAttack, isEnemyHitByAttack, calculateDistance, createSafePlayerData } from './gameUtils';
+import { isPlayerHitBySpell, isPlayerHitByAttack, calculateDistance, createSafePlayerData } from './gameUtils';
 import { broadcastToFloor, broadcastToFloorExcluding, floorClients } from './floorManager';
 
 // Rate limiting for movement updates
