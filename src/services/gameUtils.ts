@@ -92,24 +92,6 @@ export function isPlayerHitBySpell(playerPosition: Position, spellData: SpellDat
 }
 
 /**
- * Check if an enemy is hit by a spell
- * Note: enemies have x,y coordinates that correspond to x,z in spell coordinate system
- */
-export function isEnemyHitBySpell(enemyPosition: { x: number; y: number }, spellData: SpellData): boolean {
-  // Convert enemy position to 3D coordinates for spell checking
-  // Enemy x,y maps to spell x,z coordinates, use a default y coordinate
-  const enemyPos3D: Position = {
-    x: enemyPosition.x,
-    y: 6, // Default y coordinate for enemies (matches typical player y)
-    z: enemyPosition.y // Enemy y becomes spell z
-  };
-  
-  console.log(`[ENEMY HIT DEBUG] Checking enemy at (${enemyPosition.x}, ${enemyPosition.y}) -> 3D (${enemyPos3D.x}, ${enemyPos3D.y}, ${enemyPos3D.z})`);
-  
-  return isPlayerHitBySpell(enemyPos3D, spellData);
-}
-
-/**
  * Check if a player is hit by an attack (punch, melee, or ranged)
  */
 export function isPlayerHitByAttack(playerPosition: Position, attackData: AttackData): boolean {
@@ -202,22 +184,6 @@ export function isPlayerHitByAttack(playerPosition: Position, attackData: Attack
   console.log(`[ATTACK HIT DEBUG] In direction: ${isInDirection}, within cone: ${isWithinCone}, perpendicular distance: ${perpendicularDistance}, hit: ${isHit}`);
   
   return isHit;
-}
-
-/**
- * Check if an enemy is hit by an attack
- */
-export function isEnemyHitByAttack(enemyPosition: { x: number; y: number }, attackData: AttackData): boolean {
-  // Convert enemy position to 3D coordinates for attack checking
-  const enemyPos3D: Position = {
-    x: enemyPosition.x,
-    y: 6, // Default y coordinate for enemies
-    z: enemyPosition.y // Enemy y becomes attack z
-  };
-  
-  console.log(`[ENEMY ATTACK HIT DEBUG] Checking enemy at (${enemyPosition.x}, ${enemyPosition.y}) -> 3D (${enemyPos3D.x}, ${enemyPos3D.y}, ${enemyPos3D.z})`);
-  
-  return isPlayerHitByAttack(enemyPos3D, attackData);
 }
 
 /**
