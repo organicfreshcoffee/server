@@ -46,7 +46,7 @@ module.exports = {
       
       selectedItems.forEach(itemTypeName => {
         // Generate drop percentage between 5% and 25%
-        const dropPercentage = Math.round((Math.random() * 0.2 + 0.05) * 100) / 100; // 0.05 to 0.25
+        const dropPercentage = Math.round((Math.random() * 0.5 + 0.05) * 100) / 100; // 0.05 to 0.25
 
         lootData.push({
           enemyTypeName,
