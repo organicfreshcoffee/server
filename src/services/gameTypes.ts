@@ -14,6 +14,7 @@ export interface MoveBroadcastData extends Record<string, unknown> {
   position: Position;
   rotation?: Position;
   character: Record<string, unknown>; // Always included (required for consistent client state)
+  health?: number; // Current health of the player
   isMoving?: boolean;
   movementDirection?: 'forward' | 'backward' | 'none';
   timestamp: Date;
