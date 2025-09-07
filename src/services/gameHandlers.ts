@@ -147,14 +147,10 @@ export async function handlePlayerMove(
       playerId: client.playerId!,
       position,
       character: characterToSend, // Use the most current character data
+      health: gamePlayer?.health || 100, // Include current health
       timestamp: new Date(),
     };
-    
-    console.log(`[BROADCAST DEBUG] Broadcasting MongoDB playerId: ${client.playerId} for Firebase userId: ${client.userId} from client ${clientId}`);
-    console.log(`[CHARACTER DEBUG] Character from move:`, character);
-    console.log(`[CHARACTER DEBUG] Character in gamePlayer:`, gamePlayer?.character);
-    console.log(`[CHARACTER DEBUG] Broadcasting character data:`, characterToSend);
-    
+ 
     if (rotation) {
       broadcastData.rotation = rotation;
     }
