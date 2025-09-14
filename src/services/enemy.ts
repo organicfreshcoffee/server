@@ -733,7 +733,10 @@ export class Enemy {
       const playersOnFloor = getPlayersOnFloor(this.enemyData.floorName, clients, gameState);
       
       for (const player of playersOnFloor) {
+        console.log(`[COLLISION DEBUG] Checking player ${player.username} (${player.id}): position=${JSON.stringify(player.position)}, isAlive=${player.isAlive}, health=${player.health}`);
+        
         if (!player.position || !player.isAlive || !player.id) {
+          console.log(`[COLLISION DEBUG] Skipping player ${player.username}: position=${!!player.position}, isAlive=${player.isAlive}, id=${!!player.id}`);
           continue;
         }
 
@@ -746,12 +749,20 @@ export class Enemy {
 
         const distance = calculateDistance(player.position, attackPos3D);
         const hitRadius = 1.5; // Hit detection radius
+        
+        console.log(`[COLLISION DEBUG] Player ${player.username} distance from attack: ${distance.toFixed(2)}, hit radius: ${hitRadius}`);
 
         if (distance <= hitRadius) {
           console.log(`[ENEMY ATTACK] Attack from enemy ${this.enemyData.id} hit player ${player.username} at distance ${distance.toFixed(2)}`);
           
-          // Apply damage to player
-          this.damagePlayer(player);
+          // Get the full player data from game state (includes userId needed for database updates)
+          const fullPlayer = gameState.players.get(player.id!);
+          if (fullPlayer) {
+            // Apply damage to player using full player data
+            this.damagePlayer(fullPlayer);
+          } else {
+            console.error(`[ENEMY ATTACK] Could not find full player data for ${player.id} in game state`);
+          }
           return true; // Attack hit, should reset
         }
       }
@@ -765,7 +776,7 @@ export class Enemy {
   /**
    * Apply damage to a player hit by enemy attack
    */
-  private async damagePlayer(player: Partial<Player>): Promise<void> {
+  private async damagePlayer(player: Player): Promise<void> {
     try {
       // Ensure required properties are available
       if (!player.id || !player.userId || player.health === undefined) {
