@@ -11,6 +11,10 @@ import { broadcastToFloor, broadcastToFloorExcluding, floorClients } from './flo
 const MOVEMENT_UPDATE_RATE_LIMIT = 30; // Max updates per second per player
 const moveUpdateTimestamps = new Map<string, number[]>(); // clientId -> array of timestamps
 
+// Database save tracking for players (save every 2 seconds)
+const DB_SAVE_INTERVAL = 2000; // 2 seconds in milliseconds
+const playerLastDbSave = new Map<string, number>(); // userId -> timestamp of last DB save
+
 /**
  * Check if client can send movement update (rate limiting)
  */
@@ -38,6 +42,29 @@ export function canSendMovementUpdate(clientId: string): boolean {
  */
 export function cleanupRateLimitData(clientId: string): void {
   moveUpdateTimestamps.delete(clientId);
+}
+
+/**
+ * Clean up database save tracking data for a user
+ */
+export function cleanupDbSaveData(userId: string): void {
+  playerLastDbSave.delete(userId);
+}
+
+/**
+ * Check if player data should be saved to database (every 2 seconds)
+ */
+function shouldSavePlayerToDb(userId: string): boolean {
+  const now = Date.now();
+  const lastSave = playerLastDbSave.get(userId) || 0;
+  return (now - lastSave) >= DB_SAVE_INTERVAL;
+}
+
+/**
+ * Mark player as saved to database
+ */
+function markPlayerSavedToDb(userId: string): void {
+  playerLastDbSave.set(userId, Date.now());
 }
 
 /**
@@ -123,10 +150,7 @@ export async function handlePlayerMove(
 
     console.log(`Player ${client.playerId} (Firebase: ${client.userId}) moving to position:`, position, rotation ? `with rotation:` : '', rotation);
 
-    // Update player position, rotation, and character in database
-    await playerService.updatePlayerPositionRotationAndCharacter(client.userId, position, rotation, character);
-
-    // Update game state
+    // Update game state first (in-memory)
     const gamePlayer = gameState.players.get(client.playerId!);
     if (gamePlayer) {
       gamePlayer.position = position;
@@ -137,6 +161,12 @@ export async function handlePlayerMove(
         gamePlayer.character = character;
       }
       gamePlayer.lastUpdate = new Date();
+    }
+
+    // Only save to database every 2 seconds to reduce DB load
+    if (shouldSavePlayerToDb(client.userId)) {
+      await playerService.updatePlayerPositionRotationAndCharacter(client.userId, position, rotation, character);
+      markPlayerSavedToDb(client.userId);
     }
 
     // Broadcast position update to other clients
@@ -405,16 +435,10 @@ async function checkPlayersForSpellHit(
       continue;
     }
     
-    // Get fresh player data from database to ensure we have the latest position
-    let targetPlayer;
-    try {
-      targetPlayer = await playerService.getPlayer(targetClient.userId);
-      if (!targetPlayer) {
-        console.log(`[SPELL HIT DEBUG] Could not find player in database for userId: ${targetClient.userId}`);
-        continue;
-      }
-    } catch (error) {
-      console.error(`[SPELL HIT DEBUG] Error fetching player from database:`, error);
+    // Get player data from in-memory game state (latest position)
+    const targetPlayer = gameState.players.get(targetClient.playerId);
+    if (!targetPlayer) {
+      console.log(`[SPELL HIT DEBUG] Could not find player in game state for playerId: ${targetClient.playerId}`);
       continue;
     }
     
@@ -493,6 +517,21 @@ async function checkPlayersForSpellHit(
             isAlive: newHealth > 0,
             hitType: 'spell',
           },
+        }, clients);
+
+        // Broadcast player_moved to update health display for all clients
+        console.log(`[SPELL HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username}`);
+        const updatedPlayer = gameStatePlayer || targetPlayer;
+        broadcastToFloor(currentFloor, {
+          type: 'player_moved',
+          data: {
+            playerId: targetPlayer.id,
+            position: updatedPlayer.position,
+            character: updatedPlayer.character || { type: 'unknown' },
+            health: newHealth,
+            rotation: updatedPlayer.rotation,
+            timestamp: new Date(),
+          } as MoveBroadcastData,
         }, clients);
         
         console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} health updated: ${newHealth}/${targetPlayer.maxHealth}`);
@@ -709,16 +748,10 @@ async function checkPlayersForAttackHit(
       continue;
     }
     
-    // Get fresh player data from database to ensure we have the latest position
-    let targetPlayer;
-    try {
-      targetPlayer = await playerService.getPlayer(targetClient.userId);
-      if (!targetPlayer) {
-        console.log(`[ATTACK HIT DEBUG] Could not find player in database for userId: ${targetClient.userId}`);
-        continue;
-      }
-    } catch (error) {
-      console.error(`[ATTACK HIT DEBUG] Error fetching player from database:`, error);
+    // Get player data from in-memory game state (latest position)
+    const targetPlayer = gameState.players.get(targetClient.playerId);
+    if (!targetPlayer) {
+      console.log(`[ATTACK HIT DEBUG] Could not find player in game state for playerId: ${targetClient.playerId}`);
       continue;
     }
     
@@ -793,6 +826,21 @@ async function checkPlayersForAttackHit(
             isAlive: newHealth > 0,
             hitType: 'attack',
           },
+        }, clients);
+
+        // Broadcast player_moved to update health display for all clients
+        console.log(`[ATTACK HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username}`);
+        const updatedPlayer = gameStatePlayer || targetPlayer;
+        broadcastToFloor(currentFloor, {
+          type: 'player_moved',
+          data: {
+            playerId: targetPlayer.id,
+            position: updatedPlayer.position,
+            character: updatedPlayer.character || { type: 'unknown' },
+            health: newHealth,
+            rotation: updatedPlayer.rotation,
+            timestamp: new Date(),
+          } as MoveBroadcastData,
         }, clients);
         
         console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} health updated: ${newHealth}/${targetPlayer.maxHealth}`);
