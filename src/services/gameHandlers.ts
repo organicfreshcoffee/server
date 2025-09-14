@@ -168,8 +168,19 @@ export async function handlePlayerMove(
         try {
           const dbPlayer = await playerService.getPlayer(client.userId);
           if (dbPlayer) {
-            gamePlayer.isAlive = dbPlayer.isAlive !== undefined ? dbPlayer.isAlive : true;
-            console.log(`[MOVE DEBUG] Updated player ${client.playerId} isAlive from database: ${gamePlayer.isAlive}`);
+            if (dbPlayer.isAlive !== undefined) {
+              gamePlayer.isAlive = dbPlayer.isAlive;
+              console.log(`[MOVE DEBUG] Updated player ${client.playerId} isAlive from database: ${gamePlayer.isAlive}`);
+            } else {
+              // Database isAlive is also undefined, determine from health
+              const derivedIsAlive = dbPlayer.health > 0;
+              gamePlayer.isAlive = derivedIsAlive;
+              console.log(`[MOVE DEBUG] Database isAlive undefined, derived from health (${dbPlayer.health}): ${derivedIsAlive}`);
+              
+              // Update database with derived isAlive status
+              await playerService.updatePlayerHealthAndMaxHealth(client.userId, dbPlayer.health, dbPlayer.maxHealth);
+              console.log(`[MOVE DEBUG] Updated database isAlive for player ${client.playerId}: ${derivedIsAlive}`);
+            }
           } else {
             console.warn(`[MOVE DEBUG] Could not find player ${client.userId} in database, defaulting isAlive to true`);
             gamePlayer.isAlive = true;

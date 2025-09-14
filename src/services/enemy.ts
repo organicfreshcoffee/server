@@ -3,6 +3,7 @@ import { clients, gameState } from './websocket';
 import { calculateDistance, createSafePlayerData } from './gameUtils';
 import { getDatabase } from '../config/database';
 import { ItemService } from './itemService';
+import { PlayerService } from './playerService';
 import { MoveBroadcastData } from './gameTypes';
 
 export interface EnemyData {
@@ -46,6 +47,7 @@ export class Enemy {
     private enemyData: EnemyData, 
     floorTiles: Array<{ x: number; y: number }>,
     itemService: ItemService,
+    private playerService: PlayerService,
     onDespawn?: (enemyId: string) => void
   ) {
     this.startTime = Date.now();
@@ -794,6 +796,14 @@ export class Enemy {
           gameStatePlayer.isAlive = false;
           console.log(`[ENEMY ATTACK] Player ${player.username} killed by enemy ${this.enemyData.id}!`);
         }
+      }
+
+      // Update health in database (this also updates isAlive)
+      try {
+        await this.playerService.updatePlayerHealth(player.userId, newHealth);
+        console.log(`[ENEMY ATTACK] Updated ${player.username} health in database: ${player.health} -> ${newHealth}`);
+      } catch (error) {
+        console.error(`[ENEMY ATTACK] Error updating player health in database:`, error);
       }
 
       // Find the client for this player and send health update
