@@ -192,6 +192,7 @@ export function isPlayerHitByAttack(playerPosition: Position, attackData: Attack
 export function createSafePlayerData(player: Player): Partial<Player> {
   return {
     id: player.id,
+    username: player.username, // Include username for debugging and display
     position: player.position,
     rotation: player.rotation,
     character: player.character || { type: 'unknown' }, // Always include character data or default
@@ -201,7 +202,8 @@ export function createSafePlayerData(player: Player): Partial<Player> {
     experience: player.experience,
     lastUpdate: player.lastUpdate,
     isOnline: player.isOnline,
+    isAlive: player.isAlive, // Include isAlive for enemy agro and other systems
     currentDungeonDagNodeName: player.currentDungeonDagNodeName,
-    // Explicitly exclude userId, username, and email
+    // Explicitly exclude userId and email (sensitive data)
   };
 }
