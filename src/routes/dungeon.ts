@@ -448,12 +448,13 @@ router.get('/visited-nodes', async (req: AuthenticatedRequest, res): Promise<voi
 });
 
 /**
- * Get items on current floor
- * GET /api/dungeon/floor-items
+ * Get items on specified floor
+ * GET /api/dungeon/floor-items?floorName=<floorName>
  */
 router.get('/floor-items', async (req: AuthenticatedRequest, res): Promise<void> => {
   try {
     const userId = req.user?.uid;
+    const { floorName } = req.query;
 
     if (!userId) {
       res.status(401).json({
@@ -463,24 +464,21 @@ router.get('/floor-items', async (req: AuthenticatedRequest, res): Promise<void>
       return;
     }
 
-    // Get player's current floor
-    const player = await playerService.getPlayer(userId);
-    if (!player) {
-      res.status(404).json({
+    if (!floorName || typeof floorName !== 'string') {
+      res.status(400).json({
         success: false,
-        error: 'Player not found'
+        error: 'floorName query parameter is required and must be a string'
       });
       return;
     }
 
-    // Get items on the player's current floor
-    const currentFloor = player.currentDungeonDagNodeName || 'A'; // Default to root floor
-    const items = await itemService.getItemsOnFloor(currentFloor);
+    // Get items on the specified floor
+    const items = await itemService.getItemsOnFloor(floorName);
 
     res.json({
       success: true,
       data: {
-        floor: currentFloor,
+        floor: floorName,
         items: items
       }
     });
@@ -550,6 +548,7 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
         manaMultiplier: number;
       };
       spawnDatetime: Date;
+      equipped: boolean;
     }
 
     const itemsByCategory: Record<string, InventoryItem[]> = {};
@@ -575,7 +574,8 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
         weight: item.weight,
         weaponStats: item.weaponStats,
         armorStats: item.armorStats,
-        spawnDatetime: item.spawnDatetime
+        spawnDatetime: item.spawnDatetime,
+        equipped: item.equipped
       });
     }
 
@@ -598,7 +598,8 @@ router.get('/inventory', async (req: AuthenticatedRequest, res): Promise<void> =
             weight: item.weight,
             weaponStats: item.weaponStats,
             armorStats: item.armorStats,
-            spawnDatetime: item.spawnDatetime
+            spawnDatetime: item.spawnDatetime,
+            equipped: item.equipped
           })),
           itemsByCategory,
           statistics: {
@@ -665,6 +666,323 @@ router.post('/pickup-item', async (req: AuthenticatedRequest, res): Promise<void
     }
   } catch (error) {
     console.error('Error in pickup-item:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Drop an item
+ * POST /api/dungeon/drop-item
+ */
+router.post('/drop-item', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    const { itemId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    if (!itemId) {
+      res.status(400).json({
+        success: false,
+        error: 'Item ID is required'
+      });
+      return;
+    }
+
+    // Check if the item is equipped before allowing drop
+    const { getDatabase } = await import('../config/database');
+    const db = getDatabase();
+    const itemToCheck = await db.collection('itemInstances').findOne({ 
+      id: itemId, 
+      owner: userId, 
+      inWorld: false 
+    });
+
+    if (!itemToCheck) {
+      res.status(404).json({
+        success: false,
+        error: 'Item not found or not owned by player'
+      });
+      return;
+    }
+
+    if (itemToCheck.equipped === true) {
+      res.status(400).json({
+        success: false,
+        error: 'Cannot drop equipped items. Unequip the item first.'
+      });
+      return;
+    }
+
+    // Get player to access current position and floor
+    const player = await playerService.getPlayer(userId);
+    if (!player) {
+      res.status(404).json({
+        success: false,
+        error: 'Player not found'
+      });
+      return;
+    }
+
+    const currentFloor = player.currentDungeonDagNodeName || 'A';
+    
+    // Get floor tiles for the current floor
+    const tileData = await dungeonService.getGeneratedFloorTileData(currentFloor);
+    if (!tileData || !tileData.tiles.floorTiles.length) {
+      res.status(400).json({
+        success: false,
+        error: 'No floor tiles found for current floor'
+      });
+      return;
+    }
+
+    const floorTilePositions = tileData.tiles.floorTiles.map(tile => ({
+      x: tile.x,
+      y: tile.y
+    }));
+
+    // Try to drop the item at the player's current position
+    const success = await itemService.dropItem(
+      itemId, 
+      userId, 
+      player.position.x, 
+      player.position.z, 
+      currentFloor,
+      floorTilePositions
+    );
+
+    if (success) {
+      // Get the updated item data to send back
+      const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
+
+      res.json({
+        success: true,
+        message: 'Item dropped successfully',
+        item: updatedItem
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'Item could not be dropped (may not belong to player, not exist, or is equipped)'
+      });
+    }
+  } catch (error) {
+    console.error('Error in drop-item:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Equip an item
+ * POST /api/dungeon/equip-item
+ */
+router.post('/equip-item', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    const { itemId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    if (!itemId) {
+      res.status(400).json({
+        success: false,
+        error: 'Item ID is required'
+      });
+      return;
+    }
+
+    const { getDatabase } = await import('../config/database');
+    const db = getDatabase();
+
+    // First, get the item to check its category and verify ownership
+    const itemToEquip = await db.collection('itemInstances').findOne({ 
+      id: itemId, 
+      owner: userId, 
+      inWorld: false 
+    });
+
+    if (!itemToEquip) {
+      res.status(404).json({
+        success: false,
+        error: 'Item not found or not owned by player'
+      });
+      return;
+    }
+
+    // Check if item is already equipped
+    if (itemToEquip.equipped === true) {
+      res.status(400).json({
+        success: false,
+        error: 'Item is already equipped'
+      });
+      return;
+    }
+
+    // Define equipment slot limits
+    const equipmentLimits: Record<string, number> = {
+      'Ring': 2,
+      'Amulet': 1,
+      'Chest armor': 1,
+      'Head armor': 1,
+      'Cloak': 1,
+      'Leg armor': 1,
+      'Shoes': 1,
+      'Gloves': 1,
+      'Shield': 1,
+      'Range Weapon': 1,
+      'Melee Weapon': 1,
+      'Magic Weapon': 1
+    };
+
+    const itemCategory = itemToEquip.category;
+    const maxAllowed = equipmentLimits[itemCategory];
+
+    if (maxAllowed === undefined) {
+      res.status(400).json({
+        success: false,
+        error: `Items of category '${itemCategory}' cannot be equipped`
+      });
+      return;
+    }
+
+    // For weapons, check all weapon types together (only 1 weapon total)
+    let currentlyEquippedCount = 0;
+    if (['Range Weapon', 'Melee Weapon', 'Magic Weapon'].includes(itemCategory)) {
+      currentlyEquippedCount = await db.collection('itemInstances').countDocuments({
+        owner: userId,
+        inWorld: false,
+        equipped: true,
+        category: { $in: ['Range Weapon', 'Melee Weapon', 'Magic Weapon'] }
+      });
+    } else {
+      // For other items, check only the specific category
+      currentlyEquippedCount = await db.collection('itemInstances').countDocuments({
+        owner: userId,
+        inWorld: false,
+        equipped: true,
+        category: itemCategory
+      });
+    }
+
+    if (currentlyEquippedCount >= maxAllowed) {
+      const itemType = ['Range Weapon', 'Melee Weapon', 'Magic Weapon'].includes(itemCategory) ? 'weapon' : itemCategory.toLowerCase();
+      res.status(400).json({
+        success: false,
+        error: `Cannot equip ${itemCategory}. You already have the maximum number of ${itemType}${maxAllowed > 1 ? 's' : ''} equipped (${currentlyEquippedCount}/${maxAllowed})`
+      });
+      return;
+    }
+
+    // Update the item to set equipped to true
+    const result = await db.collection('itemInstances').updateOne(
+      { 
+        id: itemId, 
+        owner: userId, 
+        inWorld: false 
+      },
+      { 
+        $set: { equipped: true }
+      }
+    );
+
+    if (result.modifiedCount > 0) {
+      // Get the updated item data to send back
+      const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
+
+      res.json({
+        success: true,
+        message: 'Item equipped successfully',
+        item: updatedItem
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'Item could not be equipped (may not belong to player or not exist)'
+      });
+    }
+  } catch (error) {
+    console.error('Error in equip-item:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Unequip an item
+ * POST /api/dungeon/unequip-item
+ */
+router.post('/unequip-item', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    const { itemId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'User not authenticated'
+      });
+      return;
+    }
+
+    if (!itemId) {
+      res.status(400).json({
+        success: false,
+        error: 'Item ID is required'
+      });
+      return;
+    }
+
+    // Update the item to set equipped to false
+    const { getDatabase } = await import('../config/database');
+    const db = getDatabase();
+    const result = await db.collection('itemInstances').updateOne(
+      { 
+        id: itemId, 
+        owner: userId, 
+        inWorld: false 
+      },
+      { 
+        $set: { equipped: false }
+      }
+    );
+
+    if (result.modifiedCount > 0) {
+      // Get the updated item data to send back
+      const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
+
+      res.json({
+        success: true,
+        message: 'Item unequipped successfully',
+        item: updatedItem
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: 'Item could not be unequipped (may not belong to player or not exist)'
+      });
+    }
+  } catch (error) {
+    console.error('Error in unequip-item:', error);
     res.status(500).json({
       success: false,
       error: 'Internal server error'

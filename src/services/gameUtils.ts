@@ -1,5 +1,5 @@
 import { Position, Player } from '../types/game';
-import { SpellData } from './gameTypes';
+import { SpellData, AttackData } from './gameTypes';
 
 /**
  * Calculate distance between two 3D points
@@ -92,21 +92,98 @@ export function isPlayerHitBySpell(playerPosition: Position, spellData: SpellDat
 }
 
 /**
- * Check if an enemy is hit by a spell
- * Note: enemies have x,y coordinates that correspond to x,z in spell coordinate system
+ * Check if a player is hit by an attack (punch, melee, or ranged)
  */
-export function isEnemyHitBySpell(enemyPosition: { x: number; y: number }, spellData: SpellData): boolean {
-  // Convert enemy position to 3D coordinates for spell checking
-  // Enemy x,y maps to spell x,z coordinates, use a default y coordinate
-  const enemyPos3D: Position = {
-    x: enemyPosition.x,
-    y: 6, // Default y coordinate for enemies (matches typical player y)
-    z: enemyPosition.y // Enemy y becomes spell z
+export function isPlayerHitByAttack(playerPosition: Position, attackData: AttackData): boolean {
+  const { fromPosition, toPosition, range } = attackData;
+  
+  console.log(`[ATTACK HIT DEBUG] Checking hit for player at (${playerPosition.x}, ${playerPosition.y}, ${playerPosition.z})`);
+  console.log(`[ATTACK HIT DEBUG] Attack from (${fromPosition.x}, ${fromPosition.y}, ${fromPosition.z}) to (${toPosition.x}, ${toPosition.y}, ${toPosition.z}), range: ${range}`);
+  
+  if (!fromPosition || !toPosition || !range) {
+    console.log(`[ATTACK HIT DEBUG] Missing attack data, returning false`);
+    return false;
+  }
+  
+  // For attacks, we check if the player is within the attack range from the starting position
+  // and if they're roughly in the direction of the attack
+  
+  // Calculate distance from attack start to player
+  const distanceFromStart = calculateDistance(playerPosition, fromPosition);
+  
+  console.log(`[ATTACK HIT DEBUG] Distance from attack start: ${distanceFromStart}, attack range: ${range}`);
+  
+  // If player is too far from attack start, they can't be hit
+  if (distanceFromStart > range) {
+    console.log(`[ATTACK HIT DEBUG] Player too far from attack start, not hit`);
+    return false;
+  }
+  
+  // Calculate attack direction vector
+  const attackDirection = {
+    x: toPosition.x - fromPosition.x,
+    y: toPosition.y - fromPosition.y,
+    z: toPosition.z - fromPosition.z
   };
   
-  console.log(`[ENEMY HIT DEBUG] Checking enemy at (${enemyPosition.x}, ${enemyPosition.y}) -> 3D (${enemyPos3D.x}, ${enemyPos3D.y}, ${enemyPos3D.z})`);
+  // Normalize attack direction
+  const attackLength = Math.sqrt(
+    attackDirection.x * attackDirection.x + 
+    attackDirection.y * attackDirection.y + 
+    attackDirection.z * attackDirection.z
+  );
   
-  return isPlayerHitBySpell(enemyPos3D, spellData);
+  if (attackLength === 0) {
+    // If attack has no direction, just check if player is within range
+    const isHit = distanceFromStart <= range;
+    console.log(`[ATTACK HIT DEBUG] Zero-direction attack, hit: ${isHit}`);
+    return isHit;
+  }
+  
+  const normalizedAttackDirection = {
+    x: attackDirection.x / attackLength,
+    y: attackDirection.y / attackLength,
+    z: attackDirection.z / attackLength
+  };
+  
+  // Vector from attack start to player
+  const toPlayerVector = {
+    x: playerPosition.x - fromPosition.x,
+    y: playerPosition.y - fromPosition.y,
+    z: playerPosition.z - fromPosition.z
+  };
+  
+  // Calculate dot product to see if player is in the general direction of the attack
+  const dotProduct = 
+    toPlayerVector.x * normalizedAttackDirection.x + 
+    toPlayerVector.y * normalizedAttackDirection.y + 
+    toPlayerVector.z * normalizedAttackDirection.z;
+  
+  console.log(`[ATTACK HIT DEBUG] Dot product (direction alignment): ${dotProduct}`);
+  
+  // Player must be in the forward direction of the attack (dot product > 0)
+  // and within a reasonable cone angle (we'll use a generous threshold)
+  const isInDirection = dotProduct > 0;
+  
+  // Calculate the perpendicular distance from the attack line
+  const projectionLength = Math.max(0, Math.min(range, dotProduct));
+  const projectedPoint = {
+    x: fromPosition.x + normalizedAttackDirection.x * projectionLength,
+    y: fromPosition.y + normalizedAttackDirection.y * projectionLength,
+    z: fromPosition.z + normalizedAttackDirection.z * projectionLength
+  };
+  
+  const perpendicularDistance = calculateDistance(playerPosition, projectedPoint);
+  
+  // Use a generous hit radius for attacks (wider than spells since they're more direct)
+  const attackHitRadius = 2.5; // Adjust this value as needed for game balance
+  
+  const isWithinCone = perpendicularDistance <= attackHitRadius;
+  const isHit = isInDirection && isWithinCone && distanceFromStart <= range;
+  
+  console.log(`[ATTACK HIT DEBUG] In direction: ${isInDirection}, within cone: ${isWithinCone}, perpendicular distance: ${perpendicularDistance}, hit: ${isHit}`);
+  
+  return isHit;
 }
 
 /**
@@ -115,6 +192,7 @@ export function isEnemyHitBySpell(enemyPosition: { x: number; y: number }, spell
 export function createSafePlayerData(player: Player): Partial<Player> {
   return {
     id: player.id,
+    username: player.username, // Include username for debugging and display
     position: player.position,
     rotation: player.rotation,
     character: player.character || { type: 'unknown' }, // Always include character data or default
@@ -124,7 +202,8 @@ export function createSafePlayerData(player: Player): Partial<Player> {
     experience: player.experience,
     lastUpdate: player.lastUpdate,
     isOnline: player.isOnline,
+    isAlive: player.isAlive, // Include isAlive for enemy agro and other systems
     currentDungeonDagNodeName: player.currentDungeonDagNodeName,
-    // Explicitly exclude userId, username, and email
+    // Explicitly exclude userId and email (sensitive data)
   };
 }

@@ -14,6 +14,7 @@ export interface MoveBroadcastData extends Record<string, unknown> {
   position: Position;
   rotation?: Position;
   character: Record<string, unknown>; // Always included (required for consistent client state)
+  health?: number; // Current health of the player
   isMoving?: boolean;
   movementDirection?: 'forward' | 'backward' | 'none';
   timestamp: Date;
@@ -38,4 +39,18 @@ export interface SpellData {
   range?: number;
   timestamp?: number;
   casterPosition?: Position;
+}
+
+export interface AttackData {
+  fromPosition: Position;
+  toPosition: Position;
+  direction: Position;
+  range: number;
+  timestamp: number;
+}
+
+export interface HealthUpdateData {
+  playerId: string; // Firebase userId sent by client (validated against authenticated user)
+  health: number;
+  maxHealth: number;
 }

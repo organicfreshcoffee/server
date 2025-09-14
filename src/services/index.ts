@@ -7,8 +7,8 @@ import { ItemService } from './itemService';
 // Create singleton instances
 export const dungeonService = new DungeonService();
 export const playerService = new PlayerService();
-export const enemyService = new EnemyService();
 export const itemService = new ItemService();
+export const enemyService = new EnemyService(itemService, playerService);
 
 // Re-export types for convenience
 export type { EnemyInterface, EnemyType } from './enemyService';

@@ -1,15 +1,19 @@
 import { WebSocket } from 'ws';
 import { WebSocketClient, GameState, GameMessage } from '../types/game';
-import { SpellData, MoveData, ActionData, RespawnData, MoveBroadcastData } from './gameTypes';
+import { SpellData, MoveData, ActionData, RespawnData, MoveBroadcastData, AttackData } from './gameTypes';
 import { PlayerService } from './playerService';
 import { EnemyService } from './enemyService';
 import { DungeonService } from './dungeonService';
-import { isPlayerHitBySpell, isEnemyHitBySpell, calculateDistance, createSafePlayerData } from './gameUtils';
+import { isPlayerHitBySpell, isPlayerHitByAttack, calculateDistance, createSafePlayerData } from './gameUtils';
 import { broadcastToFloor, broadcastToFloorExcluding, floorClients } from './floorManager';
 
 // Rate limiting for movement updates
 const MOVEMENT_UPDATE_RATE_LIMIT = 30; // Max updates per second per player
 const moveUpdateTimestamps = new Map<string, number[]>(); // clientId -> array of timestamps
+
+// Database save tracking for players (save every 2 seconds)
+const DB_SAVE_INTERVAL = 2000; // 2 seconds in milliseconds
+const playerLastDbSave = new Map<string, number>(); // userId -> timestamp of last DB save
 
 /**
  * Check if client can send movement update (rate limiting)
@@ -38,6 +42,29 @@ export function canSendMovementUpdate(clientId: string): boolean {
  */
 export function cleanupRateLimitData(clientId: string): void {
   moveUpdateTimestamps.delete(clientId);
+}
+
+/**
+ * Clean up database save tracking data for a user
+ */
+export function cleanupDbSaveData(userId: string): void {
+  playerLastDbSave.delete(userId);
+}
+
+/**
+ * Check if player data should be saved to database (every 2 seconds)
+ */
+function shouldSavePlayerToDb(userId: string): boolean {
+  const now = Date.now();
+  const lastSave = playerLastDbSave.get(userId) || 0;
+  return (now - lastSave) >= DB_SAVE_INTERVAL;
+}
+
+/**
+ * Mark player as saved to database
+ */
+function markPlayerSavedToDb(userId: string): void {
+  playerLastDbSave.set(userId, Date.now());
 }
 
 /**
@@ -123,10 +150,7 @@ export async function handlePlayerMove(
 
     console.log(`Player ${client.playerId} (Firebase: ${client.userId}) moving to position:`, position, rotation ? `with rotation:` : '', rotation);
 
-    // Update player position, rotation, and character in database
-    await playerService.updatePlayerPositionRotationAndCharacter(client.userId, position, rotation, character);
-
-    // Update game state
+    // Update game state first (in-memory)
     const gamePlayer = gameState.players.get(client.playerId!);
     if (gamePlayer) {
       gamePlayer.position = position;
@@ -137,6 +161,38 @@ export async function handlePlayerMove(
         gamePlayer.character = character;
       }
       gamePlayer.lastUpdate = new Date();
+      
+      // Check if isAlive is undefined and query database if needed
+      if (gamePlayer.isAlive === undefined) {
+        console.log(`[MOVE DEBUG] Player ${client.playerId} has undefined isAlive, querying database...`);
+        try {
+          const dbPlayer = await playerService.getPlayer(client.userId);
+          if (dbPlayer) {
+            if (dbPlayer.isAlive !== undefined) {
+              gamePlayer.isAlive = dbPlayer.isAlive;
+            } else {
+              // Database isAlive is also undefined, determine from health
+              const derivedIsAlive = dbPlayer.health > 0;
+              gamePlayer.isAlive = derivedIsAlive;
+              
+              // Update database with derived isAlive status
+              await playerService.updatePlayerHealthAndMaxHealth(client.userId, dbPlayer.health, dbPlayer.maxHealth);
+            }
+          } else {
+            console.warn(`[MOVE DEBUG] Could not find player ${client.userId} in database, defaulting isAlive to true`);
+            gamePlayer.isAlive = true;
+          }
+        } catch (error) {
+          console.error(`[MOVE DEBUG] Error querying database for player ${client.userId} isAlive status:`, error);
+          gamePlayer.isAlive = true; // Default to alive on error
+        }
+      }
+    }
+
+    // Only save to database every 2 seconds to reduce DB load
+    if (shouldSavePlayerToDb(client.userId)) {
+      await playerService.updatePlayerPositionRotationAndCharacter(client.userId, position, rotation, character);
+      markPlayerSavedToDb(client.userId);
     }
 
     // Broadcast position update to other clients
@@ -147,14 +203,10 @@ export async function handlePlayerMove(
       playerId: client.playerId!,
       position,
       character: characterToSend, // Use the most current character data
+      health: gamePlayer?.health || 100, // Include current health
       timestamp: new Date(),
     };
-    
-    console.log(`[BROADCAST DEBUG] Broadcasting MongoDB playerId: ${client.playerId} for Firebase userId: ${client.userId} from client ${clientId}`);
-    console.log(`[CHARACTER DEBUG] Character from move:`, character);
-    console.log(`[CHARACTER DEBUG] Character in gamePlayer:`, gamePlayer?.character);
-    console.log(`[CHARACTER DEBUG] Broadcasting character data:`, characterToSend);
-    
+ 
     if (rotation) {
       broadcastData.rotation = rotation;
     }
@@ -200,18 +252,24 @@ export async function handlePlayerAction(
     return;
   }
 
-  // Handle different player actions (attack, interact, etc.)
-  console.log(`[PLAYER ACTION DEBUG] Player action from ${clientId}:`, JSON.stringify(data, null, 2));
-  
   // Special handling for spell_cast actions
   if (data.action === 'spell_cast' && data.data) {
-    console.log(`[PLAYER ACTION DEBUG] Detected spell_cast action, calling handleSpellCast`);
     // Type guard for spell data
     const spellData = data.data as unknown as SpellData;
     if (spellData.fromPosition && spellData.toPosition && spellData.spellRadius) {
       await handleSpellCast(clientId, spellData, clients, gameState, playerService, enemyService);
     } else {
       console.log(`[PLAYER ACTION DEBUG] Invalid spell data structure`);
+    }
+  }
+  // Special handling for attack actions
+  else if (['punch_attack', 'melee_attack', 'range_attack'].includes(data.action) && data.data) {
+    // Type guard for attack data
+    const attackData = data.data as unknown as AttackData;
+    if (attackData.fromPosition && attackData.toPosition && attackData.range) {
+      await handleAttack(clientId, data.action, attackData, clients, gameState, playerService, enemyService);
+    } else {
+      console.log(`[PLAYER ACTION DEBUG] Invalid attack data structure for ${data.action}`);
     }
   } else {
     console.log(`[PLAYER ACTION DEBUG] Action type: ${data.action}, has data: ${!!data.data}`);
@@ -294,7 +352,30 @@ export async function handlePlayerRespawn(
     );
 
     // Update game state
+    console.log(`[RESPAWN DEBUG] Respawned player data:`, {
+      id: respawnedPlayer.id,
+      username: respawnedPlayer.username,
+      health: respawnedPlayer.health,
+      maxHealth: respawnedPlayer.maxHealth,
+      isAlive: respawnedPlayer.isAlive,
+      hasPosition: !!respawnedPlayer.position
+    });
+    
+    // Ensure isAlive is explicitly set to true in memory (in case database didn't update properly)
+    respawnedPlayer.isAlive = true;
+    respawnedPlayer.lastUpdate = new Date();
+    
     gameState.players.set(respawnedPlayer.id, respawnedPlayer);
+    
+    // Verify the game state was updated correctly
+    const gameStatePlayer = gameState.players.get(respawnedPlayer.id);
+    console.log(`[RESPAWN DEBUG] Game state after respawn:`, {
+      id: gameStatePlayer?.id,
+      username: gameStatePlayer?.username,
+      isAlive: gameStatePlayer?.isAlive,
+      health: gameStatePlayer?.health,
+      maxHealth: gameStatePlayer?.maxHealth
+    });
     
     // Update client's playerId if it's a new player
     if (!client.playerId) {
@@ -403,16 +484,10 @@ async function checkPlayersForSpellHit(
       continue;
     }
     
-    // Get fresh player data from database to ensure we have the latest position
-    let targetPlayer;
-    try {
-      targetPlayer = await playerService.getPlayer(targetClient.userId);
-      if (!targetPlayer) {
-        console.log(`[SPELL HIT DEBUG] Could not find player in database for userId: ${targetClient.userId}`);
-        continue;
-      }
-    } catch (error) {
-      console.error(`[SPELL HIT DEBUG] Error fetching player from database:`, error);
+    // Get player data from in-memory game state (latest position)
+    const targetPlayer = gameState.players.get(targetClient.playerId);
+    if (!targetPlayer) {
+      console.log(`[SPELL HIT DEBUG] Could not find player in game state for playerId: ${targetClient.playerId}`);
       continue;
     }
     
@@ -492,6 +567,21 @@ async function checkPlayersForSpellHit(
             hitType: 'spell',
           },
         }, clients);
+
+        // Broadcast player_moved to update health display for all clients except the hit player
+        console.log(`[SPELL HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username} (excluding them)`);
+        const updatedPlayer = gameStatePlayer || targetPlayer;
+        broadcastToFloorExcluding(currentFloor, targetClientId, {
+          type: 'player_moved',
+          data: {
+            playerId: targetPlayer.id,
+            position: updatedPlayer.position,
+            character: updatedPlayer.character || { type: 'unknown' },
+            health: newHealth,
+            rotation: updatedPlayer.rotation,
+            timestamp: new Date(),
+          } as MoveBroadcastData,
+        }, clients);
         
         console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} health updated: ${newHealth}/${targetPlayer.maxHealth}`);
       } catch (error) {
@@ -533,43 +623,44 @@ async function checkEnemiesForSpellHit(
   }
 
   try {
-    // Get all enemies on this floor
-    const enemiesOnFloor = await enemyService.getEnemiesOnFloor(currentFloor);
-    console.log(`[SPELL HIT DEBUG] Found ${enemiesOnFloor.length} enemies on floor ${currentFloor}`);
+    // Get all active enemy instances on this floor (in-memory)
+    const activeEnemiesOnFloor = enemyService.getActiveEnemiesOnFloor(currentFloor);
+    console.log(`[SPELL HIT DEBUG] Found ${activeEnemiesOnFloor.length} active enemies on floor ${currentFloor}`);
 
-    for (const enemy of enemiesOnFloor) {
+    for (const enemyInstance of activeEnemiesOnFloor) {
+      const enemyData = enemyInstance.getData();
       enemiesChecked++;
-      console.log(`[SPELL HIT DEBUG] Checking enemy ${enemy.id} (${enemy.enemyTypeName}) at position (${enemy.positionX}, ${enemy.positionY})`);
+      console.log(`[SPELL HIT DEBUG] Checking enemy ${enemyData.id} (${enemyData.enemyTypeName}) at position (${enemyData.positionX}, ${enemyData.positionY})`);
 
-      // Check if this enemy is hit by the spell
-      const enemyPosition = { x: enemy.positionX, y: enemy.positionY };
-      const adjustedSpellData: SpellData = { 
-        ...spellData, 
+      // Check if this enemy is hit by the spell using in-memory collision detection
+      const adjustedSpellData = { 
+        fromPosition: spellData.fromPosition,
+        toPosition: spellData.toPosition,
         spellRadius: adjustedSpellRadius 
       };
-      const isHit = isEnemyHitBySpell(enemyPosition, adjustedSpellData);
-      console.log(`[SPELL HIT DEBUG] Enemy hit detection result for ${enemy.enemyTypeName} (${enemy.id}): ${isHit}`);
+      const isHit = enemyInstance.checkForSpellDamage(adjustedSpellData);
+      console.log(`[SPELL HIT DEBUG] Enemy hit detection result for ${enemyData.enemyTypeName} (${enemyData.id}): ${isHit}`);
 
       if (isHit) {
-        console.log(`[SPELL HIT DEBUG] *** ENEMY HIT DETECTED *** ${enemy.enemyTypeName} (${enemy.id}) hit by spell!`);
-        enemiesHitDetected.push(enemy.enemyTypeName);
+        console.log(`[SPELL HIT DEBUG] *** ENEMY HIT DETECTED *** ${enemyData.enemyTypeName} (${enemyData.id}) hit by spell!`);
+        enemiesHitDetected.push(enemyData.enemyTypeName);
 
         // Calculate damage (same as player damage for now)
         const damage = 20;
-        const newHealth = Math.max(0, enemy.health - damage);
+        const newHealth = Math.max(0, enemyData.health - damage);
 
         try {
-          // Update enemy health and check if it died
-          const died = await enemyService.updateEnemyHealth(enemy.id, newHealth);
-          console.log(`[SPELL HIT DEBUG] Updated enemy ${enemy.id} health: ${enemy.health} -> ${newHealth}, died: ${died}`);
+          // Update enemy health using the in-memory method
+          const died = await enemyInstance.updateHealth(newHealth);
+          console.log(`[SPELL HIT DEBUG] Updated enemy ${enemyData.id} health: ${enemyData.health} -> ${newHealth}, died: ${died}`);
 
           // Broadcast enemy hit to all players on the floor
           console.log(`[SPELL HIT DEBUG] Broadcasting enemy_hit to all players on floor ${currentFloor}`);
           broadcastToFloor(currentFloor, {
             type: 'enemy_hit',
             data: {
-              enemyId: enemy.id,
-              enemyTypeName: enemy.enemyTypeName,
+              enemyId: enemyData.id,
+              enemyTypeName: enemyData.enemyTypeName,
               casterPlayerId: casterClient.playerId,
               damage: damage,
               newHealth: newHealth,
@@ -579,15 +670,18 @@ async function checkEnemiesForSpellHit(
           }, clients);
 
           if (died) {
-            console.log(`[SPELL HIT DEBUG] Enemy ${enemy.enemyTypeName} (${enemy.id}) was killed by spell!`);
+            console.log(`[SPELL HIT DEBUG] Enemy ${enemyData.enemyTypeName} (${enemyData.id}) was killed by spell!`);
           }
         } catch (error) {
-          console.error(`[SPELL HIT DEBUG] Error updating health for enemy ${enemy.id}:`, error);
+          console.error(`[SPELL HIT DEBUG] Error updating health for enemy ${enemyData.id}:`, error);
         }
       } else {
         // Log why the enemy wasn't hit for debugging
-        const distance = calculateDistance({ x: enemy.positionX, y: 6, z: enemy.positionY }, spellData.fromPosition);
-        console.log(`[SPELL HIT DEBUG] Enemy ${enemy.enemyTypeName} NOT hit. Distance from spell origin: ${distance.toFixed(2)}, adjusted spell radius: ${adjustedSpellRadius}`);
+        const distance = Math.sqrt(
+          Math.pow(enemyData.positionX - spellData.fromPosition.x, 2) + 
+          Math.pow(enemyData.positionY - spellData.fromPosition.z, 2)
+        );
+        console.log(`[SPELL HIT DEBUG] Enemy ${enemyData.enemyTypeName} NOT hit. Distance from spell origin: ${distance.toFixed(2)}, adjusted spell radius: ${adjustedSpellRadius}`);
       }
     }
 
@@ -657,4 +751,304 @@ export async function handleSpellCast(
   
   // Log overall results
   console.log(`[SPELL HIT DEBUG] Spell cast complete. Players hit: ${playersHit.length}, Enemies hit: ${enemiesHit.length}`);
+}
+
+/**
+ * Check players for attack hits
+ */
+async function checkPlayersForAttackHit(
+  attackerClientId: string, 
+  currentFloor: string, 
+  attackData: AttackData, 
+  clients: Map<string, WebSocketClient>,
+  gameState: GameState,
+  playerService: PlayerService
+): Promise<string[]> {
+  const floorClientIds = floorClients.get(currentFloor);
+  const playersHitDetected: string[] = [];
+  let playersChecked = 0;
+  
+  if (!floorClientIds) {
+    console.log(`[ATTACK HIT DEBUG] No clients found on floor ${currentFloor}`);
+    return playersHitDetected;
+  }
+
+  const attackerClient = clients.get(attackerClientId);
+  if (!attackerClient) {
+    console.log(`[ATTACK HIT DEBUG] Attacker client not found: ${attackerClientId}`);
+    return playersHitDetected;
+  }
+
+  // Check each player on the same floor for attack hits
+  for (const targetClientId of floorClientIds) {
+    // Skip the attacker
+    if (targetClientId === attackerClientId) {
+      console.log(`[ATTACK HIT DEBUG] Skipping attacker client ${targetClientId}`);
+      continue;
+    }
+    
+    const targetClient = clients.get(targetClientId);
+    if (!targetClient || !targetClient.playerId || !targetClient.userId) {
+      console.log(`[ATTACK HIT DEBUG] Target client ${targetClientId} missing required data:`, {
+        hasClient: !!targetClient,
+        playerId: targetClient?.playerId,
+        userId: targetClient?.userId
+      });
+      continue;
+    }
+    
+    // Get player data from in-memory game state (latest position)
+    const targetPlayer = gameState.players.get(targetClient.playerId);
+    if (!targetPlayer) {
+      console.log(`[ATTACK HIT DEBUG] Could not find player in game state for playerId: ${targetClient.playerId}`);
+      continue;
+    }
+    
+    if (!targetPlayer.isAlive) {
+      console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} is already dead, skipping`);
+      continue;
+    }
+    
+    playersChecked++;
+    console.log(`[ATTACK HIT DEBUG] Checking player ${targetPlayer.username} (${targetPlayer.id}) at position (${targetPlayer.position.x}, ${targetPlayer.position.y}, ${targetPlayer.position.z})`);
+    
+    // Check if this player is hit by the attack
+    const isHit = isPlayerHitByAttack(targetPlayer.position, attackData);
+    console.log(`[ATTACK HIT DEBUG] Hit detection result for ${targetPlayer.username}: ${isHit}`);
+    
+    if (isHit) {
+      console.log(`[ATTACK HIT DEBUG] *** PLAYER HIT DETECTED *** ${targetPlayer.username} (${targetPlayer.id}) hit by attack!`);
+      playersHitDetected.push(targetPlayer.username);
+      
+      // Calculate damage (for now, fixed damage of 25, but this could be made configurable)
+      const damage = 25;
+      const newHealth = Math.max(0, targetPlayer.health - damage);
+      
+      try {
+        // Update health in database
+        await playerService.updatePlayerHealth(targetClient.userId, newHealth);
+        console.log(`[ATTACK HIT DEBUG] Updated ${targetPlayer.username} health in database: ${targetPlayer.health} -> ${newHealth}`);
+        
+        // Update game state
+        const gameStatePlayer = gameState.players.get(targetClient.playerId);
+        if (gameStatePlayer) {
+          gameStatePlayer.health = newHealth;
+          gameStatePlayer.lastUpdate = new Date();
+          
+          // Check if player died
+          if (newHealth <= 0) {
+            gameStatePlayer.isAlive = false;
+            console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} died from attack damage!`);
+          }
+        } else {
+          console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} not found in gameState, updating from fresh data`);
+          targetPlayer.health = newHealth;
+          if (newHealth <= 0) {
+            targetPlayer.isAlive = false;
+          }
+          gameState.players.set(targetClient.playerId, targetPlayer);
+        }
+        
+        // Send health update to the hit player
+        console.log(`[ATTACK HIT DEBUG] Sending health_update to ${targetPlayer.username}`);
+        sendMessage(targetClientId, {
+          type: 'health_update',
+          data: {
+            health: newHealth,
+            maxHealth: targetPlayer.maxHealth,
+            damage: damage,
+            damageCause: 'attack',
+            attackerPlayerId: attackerClient.playerId,
+            isAlive: newHealth > 0,
+          },
+        }, clients);
+        
+        // Broadcast the hit to all players on the floor
+        console.log(`[ATTACK HIT DEBUG] Broadcasting player_hit to all players on floor ${currentFloor}`);
+        broadcastToFloor(currentFloor, {
+          type: 'player_hit',
+          data: {
+            targetPlayerId: targetPlayer.id,
+            attackerPlayerId: attackerClient.playerId,
+            damage: damage,
+            newHealth: newHealth,
+            isAlive: newHealth > 0,
+            hitType: 'attack',
+          },
+        }, clients);
+
+        // Broadcast player_moved to update health display for all clients except the hit player
+        console.log(`[ATTACK HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username} (excluding them)`);
+        const updatedPlayer = gameStatePlayer || targetPlayer;
+        broadcastToFloorExcluding(currentFloor, targetClientId, {
+          type: 'player_moved',
+          data: {
+            playerId: targetPlayer.id,
+            position: updatedPlayer.position,
+            character: updatedPlayer.character || { type: 'unknown' },
+            health: newHealth,
+            rotation: updatedPlayer.rotation,
+            timestamp: new Date(),
+          } as MoveBroadcastData,
+        }, clients);
+        
+        console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} health updated: ${newHealth}/${targetPlayer.maxHealth}`);
+      } catch (error) {
+        console.error(`[ATTACK HIT DEBUG] Error updating health for player ${targetPlayer.id}:`, error);
+      }
+    } else {
+      // Log why the player wasn't hit for debugging
+      const distance = calculateDistance(targetPlayer.position, attackData.fromPosition);
+      console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} NOT hit. Distance from attack origin: ${distance.toFixed(2)}, attack range: ${attackData.range}`);
+    }
+  }
+  
+  console.log(`[ATTACK HIT DEBUG] Player attack hit detection complete. Players checked: ${playersChecked}, Players hit: ${playersHitDetected.length}`);
+  if (playersHitDetected.length > 0) {
+    console.log(`[ATTACK HIT DEBUG] Players hit: ${playersHitDetected.join(', ')}`);
+  }
+
+  return playersHitDetected;
+}
+
+/**
+ * Check enemies for attack hits
+ */
+async function checkEnemiesForAttackHit(
+  attackerClientId: string,
+  currentFloor: string,
+  attackData: AttackData,
+  clients: Map<string, WebSocketClient>,
+  enemyService: EnemyService
+): Promise<string[]> {
+  const enemiesHitDetected: string[] = [];
+  let enemiesChecked = 0;
+
+  const attackerClient = clients.get(attackerClientId);
+  if (!attackerClient) {
+    console.log(`[ATTACK HIT DEBUG] Attacker client not found: ${attackerClientId}`);
+    return enemiesHitDetected;
+  }
+
+  try {
+    // Get all active enemy instances on this floor (in-memory)
+    const activeEnemiesOnFloor = enemyService.getActiveEnemiesOnFloor(currentFloor);
+    console.log(`[ATTACK HIT DEBUG] Found ${activeEnemiesOnFloor.length} active enemies on floor ${currentFloor}`);
+
+    for (const enemyInstance of activeEnemiesOnFloor) {
+      const enemyData = enemyInstance.getData();
+      enemiesChecked++;
+      console.log(`[ATTACK HIT DEBUG] Checking enemy ${enemyData.id} (${enemyData.enemyTypeName}) at position (${enemyData.positionX}, ${enemyData.positionY})`);
+
+      // Check if this enemy is hit by the attack using in-memory collision detection
+      const isHit = enemyInstance.checkForDamage(attackData);
+      console.log(`[ATTACK HIT DEBUG] Enemy hit detection result for ${enemyData.enemyTypeName} (${enemyData.id}): ${isHit}`);
+
+      if (isHit) {
+        console.log(`[ATTACK HIT DEBUG] *** ENEMY HIT DETECTED *** ${enemyData.enemyTypeName} (${enemyData.id}) hit by attack!`);
+        enemiesHitDetected.push(enemyData.enemyTypeName);
+
+        // Calculate damage (same as player damage for now)
+        const damage = 25;
+        const newHealth = Math.max(0, enemyData.health - damage);
+
+        try {
+          // Update enemy health using the in-memory method
+          const died = await enemyInstance.updateHealth(newHealth);
+          console.log(`[ATTACK HIT DEBUG] Updated enemy ${enemyData.id} health: ${enemyData.health} -> ${newHealth}, died: ${died}`);
+
+          // Broadcast enemy hit to all players on the floor
+          console.log(`[ATTACK HIT DEBUG] Broadcasting enemy_hit to all players on floor ${currentFloor}`);
+          broadcastToFloor(currentFloor, {
+            type: 'enemy_hit',
+            data: {
+              enemyId: enemyData.id,
+              enemyTypeName: enemyData.enemyTypeName,
+              attackerPlayerId: attackerClient.playerId,
+              damage: damage,
+              newHealth: newHealth,
+              died: died,
+              hitType: 'attack',
+            },
+          }, clients);
+
+          if (died) {
+            console.log(`[ATTACK HIT DEBUG] Enemy ${enemyData.enemyTypeName} (${enemyData.id}) was killed by attack!`);
+          }
+        } catch (error) {
+          console.error(`[ATTACK HIT DEBUG] Error updating health for enemy ${enemyData.id}:`, error);
+        }
+      } else {
+        // Log why the enemy wasn't hit for debugging
+        const distance = Math.sqrt(
+          Math.pow(enemyData.positionX - attackData.fromPosition.x, 2) + 
+          Math.pow(6 - attackData.fromPosition.y, 2) + 
+          Math.pow(enemyData.positionY - attackData.fromPosition.z, 2)
+        );
+        console.log(`[ATTACK HIT DEBUG] Enemy ${enemyData.enemyTypeName} NOT hit. Distance from attack origin: ${distance.toFixed(2)}, attack range: ${attackData.range}`);
+      }
+    }
+
+    console.log(`[ATTACK HIT DEBUG] Enemy attack hit detection complete. Enemies checked: ${enemiesChecked}, Enemies hit: ${enemiesHitDetected.length}`);
+    if (enemiesHitDetected.length > 0) {
+      console.log(`[ATTACK HIT DEBUG] Enemies hit: ${enemiesHitDetected.join(', ')}`);
+    }
+  } catch (error) {
+    console.error(`[ATTACK HIT DEBUG] Error checking enemies for attack hits:`, error);
+  }
+
+  return enemiesHitDetected;
+}
+
+/**
+ * Handle attack actions (punch, melee, ranged)
+ */
+export async function handleAttack(
+  attackerClientId: string,
+  attackType: string,
+  attackData: AttackData,
+  clients: Map<string, WebSocketClient>,
+  gameState: GameState,
+  playerService: PlayerService,
+  enemyService: EnemyService
+): Promise<void> {
+  const attackerClient = clients.get(attackerClientId);
+  if (!attackerClient || !attackerClient.currentDungeonDagNodeName) {
+    console.log(`[ATTACK HIT DEBUG] Attacker client not found or not on a floor. ClientId: ${attackerClientId}`);
+    return;
+  }
+  
+  const currentFloor = attackerClient.currentDungeonDagNodeName;
+  const floorClientIds = floorClients.get(currentFloor);
+  
+  if (!floorClientIds) {
+    console.log(`[ATTACK HIT DEBUG] No clients found on floor ${currentFloor}`);
+    return;
+  }
+  
+  console.log(`[ATTACK HIT DEBUG] Processing ${attackType} from player ${attackerClient.playerId} on floor ${currentFloor}`);
+  console.log(`[ATTACK HIT DEBUG] Attack data:`, JSON.stringify(attackData, null, 2));
+  console.log(`[ATTACK HIT DEBUG] Players on floor: ${Array.from(floorClientIds).length}`);
+  
+  // Validate attack data
+  const { fromPosition, toPosition, range } = attackData;
+  if (!fromPosition || !toPosition || !range) {
+    console.log(`[ATTACK HIT DEBUG] Invalid attack data - missing required fields:`, {
+      hasFromPosition: !!fromPosition,
+      hasToPosition: !!toPosition,
+      hasRange: !!range
+    });
+    return;
+  }
+  
+  console.log(`[ATTACK HIT DEBUG] Attack: from (${fromPosition.x}, ${fromPosition.y}, ${fromPosition.z}) to (${toPosition.x}, ${toPosition.y}, ${toPosition.z}) with range ${range}`);
+  
+  // Check players for attack hits
+  const playersHit = await checkPlayersForAttackHit(attackerClientId, currentFloor, attackData, clients, gameState, playerService);
+  
+  // Check enemies for attack hits
+  const enemiesHit = await checkEnemiesForAttackHit(attackerClientId, currentFloor, attackData, clients, enemyService);
+  
+  // Log overall results
+  console.log(`[ATTACK HIT DEBUG] ${attackType} complete. Players hit: ${playersHit.length}, Enemies hit: ${enemiesHit.length}`);
 }

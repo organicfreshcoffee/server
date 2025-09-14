@@ -248,6 +248,29 @@ export class ItemService {
   }
 
   /**
+   * Initialize an item instance in the world (used by both createItem and dropItem)
+   */
+  private initializeItemInWorld(itemData: ItemInstanceData, floorTiles: Array<{ x: number; y: number }>): void {
+    // Create and initialize the item instance
+    const item = new ItemInstance(itemData, floorTiles, (itemId) => {
+      // Callback to remove from active items when despawned
+      this.removeActiveItem(itemId);
+    });
+    this.activeItems.set(itemData.id, item);
+    item.init(); // Start the item thread
+    
+    // Send WebSocket message to all clients on this floor about the new item
+    broadcastToFloor(itemData.floor, {
+      type: 'item-spawned',
+      data: {
+        item: itemData
+      }
+    }, clients);
+    
+    console.log(`Initialized item ${itemData.name} with ID ${itemData.id} on floor ${itemData.floor} at world position (${itemData.location.x}, ${itemData.location.y})`);
+  }
+
+  /**
    * Create a new item instance
    */
   async createItem(
@@ -288,23 +311,8 @@ export class ItemService {
 
     await db.collection('itemInstances').insertOne(itemData);
     
-    // Create and initialize the item instance
-    const item = new ItemInstance(itemData, floorTiles, (itemId) => {
-      // Callback to remove from active items when despawned
-      this.removeActiveItem(itemId);
-    });
-    this.activeItems.set(itemData.id, item);
-    item.init(); // Start the item thread
-    
-    // Send WebSocket message to all clients on this floor about the new item
-    broadcastToFloor(floorName, {
-      type: 'item-spawned',
-      data: {
-        item: itemData
-      }
-    }, clients);
-    
-    console.log(`Created item ${itemData.name} with ID ${itemData.id} on floor ${floorName} at world position (${worldX}, ${worldY})`);
+    // Initialize the item instance in the world
+    this.initializeItemInWorld(itemData, floorTiles);
     
     return itemData;
   }
@@ -334,6 +342,84 @@ export class ItemService {
 
     console.log(`Spawned ${items.length} items on floor ${floorName}`);
     return items;
+  }
+
+  /**
+   * Drop an item (remove from player inventory and place in world)
+   */
+  async dropItem(
+    itemId: string, 
+    playerId: string, 
+    worldX: number, 
+    worldZ: number, 
+    floorName: string,
+    floorTiles: Array<{ x: number; y: number }>
+  ): Promise<boolean> {
+    const db = getDatabase();
+    
+    // First, get the item to verify it belongs to the player
+    const existingItem = await db.collection('itemInstances').findOne({ 
+      id: itemId, 
+      owner: playerId, 
+      inWorld: false 
+    });
+    
+    if (!existingItem) {
+      return false; // Item doesn't exist or doesn't belong to the player
+    }
+    
+    // Update the item: remove owner, set location, update spawn time, set inWorld to true
+    const result = await db.collection('itemInstances').updateOne(
+      { id: itemId, owner: playerId, inWorld: false },
+      { 
+        $set: { 
+          owner: null,
+          inWorld: true,
+          'location.x': worldX,
+          'location.y': worldZ,
+          floor: floorName,
+          spawnDatetime: new Date()
+        }
+      }
+    );
+
+    if (result.modifiedCount > 0) {
+      // Get the updated item data
+      const updatedItem = await db.collection('itemInstances').findOne({ id: itemId });
+      
+      if (updatedItem) {
+        // Convert to ItemInstanceData format
+        const itemData: ItemInstanceData = {
+          id: updatedItem.id,
+          itemTemplateId: updatedItem.itemTemplateId,
+          category: updatedItem.category,
+          templateName: updatedItem.templateName,
+          possibleMaterials: updatedItem.possibleMaterials,
+          material: updatedItem.material,
+          make: updatedItem.make,
+          location: updatedItem.location,
+          inWorld: updatedItem.inWorld,
+          owner: updatedItem.owner,
+          alignment: updatedItem.alignment,
+          spawnDatetime: updatedItem.spawnDatetime,
+          enchantments: updatedItem.enchantments,
+          value: updatedItem.value,
+          name: updatedItem.name,
+          weight: updatedItem.weight,
+          floor: updatedItem.floor,
+          weaponStats: updatedItem.weaponStats,
+          armorStats: updatedItem.armorStats
+        };
+        
+        // Initialize the item instance in the world
+        this.initializeItemInWorld(itemData, floorTiles);
+      }
+      
+      console.log(`Item ${itemId} dropped by player ${playerId} at world position (${worldX}, ${worldZ}) on floor ${floorName}`);
+      return true;
+    }
+    
+    return false;
   }
 
   /**
