@@ -273,9 +273,9 @@ router.get('/room-stairs/:floorDagNodeName', async (req: AuthenticatedRequest, r
 
 /**
  * Get spawn location (root dungeon node name)
- * GET /api/dungeon/spawn
+ * GET /api/dungeon/spawn-location
  */
-router.get('/spawn', async (req: AuthenticatedRequest, res): Promise<void> => {
+router.get('/spawn-location', async (req: AuthenticatedRequest, res): Promise<void> => {
   try {
     const spawnNodeName = await dungeonService.getSpawn();
 
