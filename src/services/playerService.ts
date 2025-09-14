@@ -160,17 +160,19 @@ export class PlayerService {
     );
   }
 
-  async updatePlayerHealth(userId: string, health: number): Promise<void> {
+  async updatePlayerHealth(userId: string, health: number): Promise<{ wasPreviouslyAlive: boolean; isDead: boolean; player: Player }> {
     const db = getDatabase();
     
-    // Get current player to check max health
+    // Get current player to check max health and previous alive status
     const player = await this.getPlayer(userId);
     if (!player) {
       throw new Error('Player not found');
     }
     
+    const wasPreviouslyAlive = player.isAlive;
     const clampedHealth = Math.max(0, Math.min(health, player.maxHealth));
     const isAlive = clampedHealth > 0;
+    const isDead = wasPreviouslyAlive && !isAlive; // Player just died
     
     await db.collection(this.collection).updateOne(
       { userId },
@@ -182,6 +184,10 @@ export class PlayerService {
         },
       }
     );
+
+    // Return updated player data and death information
+    const updatedPlayer = { ...player, health: clampedHealth, isAlive, lastUpdate: new Date() };
+    return { wasPreviouslyAlive, isDead, player: updatedPlayer };
   }
 
   async updatePlayerHealthAndMaxHealth(userId: string, health: number, maxHealth: number): Promise<void> {

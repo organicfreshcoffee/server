@@ -4,9 +4,7 @@ import { DungeonService } from '../services/dungeonService';
 import { AuthService } from '../services/authService';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { Player } from '../types/game';
-import { RespawnData } from '../services/gameTypes';
-import { handlePlayerRespawn } from '../services/gameHandlers';
-import { clients, gameState } from '../services/websocket';
+
 import { getDatabase } from '../config/database';
 
 const router = Router();
@@ -194,68 +192,6 @@ router.get('/export-data', authenticateToken, async (req: AuthenticatedRequest, 
   }
 });
 
-/**
- * Respawn a player
- * POST /api/user/respawn
- * Requires authentication
- */
-router.post('/respawn', authenticateToken, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  try {
-    const userId = req.user?.uid;
-    if (!userId) {
-      res.status(401).json({
-        success: false,
-        error: 'Authentication required'
-      });
-      return;
-    }
 
-    // Get character data from request body
-    const respawnData: RespawnData = {
-      characterData: req.body.characterData || undefined
-    };
-
-    console.log(`[REST] Player respawn request for userId: ${userId}`, respawnData);
-
-    // Find the client connected via WebSocket
-    let targetClientId: string | null = null;
-    for (const [clientId, client] of clients.entries()) {
-      if (client.userId === userId) {
-        targetClientId = clientId;
-        break;
-      }
-    }
-
-    if (!targetClientId) {
-      res.status(400).json({
-        success: false,
-        error: 'Player not connected via WebSocket. Please connect to the game first.'
-      });
-      return;
-    }
-
-    // Call the same handler used by WebSocket
-    await handlePlayerRespawn(
-      targetClientId,
-      respawnData,
-      clients,
-      gameState,
-      playerService,
-      dungeonService
-    );
-
-    res.json({
-      success: true,
-      message: 'Player respawned successfully'
-    });
-
-  } catch (error) {
-    console.error('Error in respawn:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error while respawning player'
-    });
-  }
-});
 
 export default router;
