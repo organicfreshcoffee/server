@@ -313,11 +313,18 @@ export async function handlePlayerAction(
 }
 
 /**
- * Handle player respawn
+ * Get death summary message
  */
-export async function handlePlayerRespawn(
+export function getDeathSummary(): string {
+  return "you died";
+}
+
+/**
+ * Handle player death
+ */
+export async function handlePlayerDeath(
   clientId: string, 
-  data: RespawnData,
+  data: any, // No longer need RespawnData since we're not respawning
   clients: Map<string, WebSocketClient>,
   gameState: GameState,
   playerService: PlayerService,
@@ -329,113 +336,73 @@ export async function handlePlayerRespawn(
     return;
   }
 
-  console.log(`Player respawn request from ${clientId}:`, data);
+  console.log(`Player death request from ${clientId}`);
 
   try {
-    // Get spawn location from dungeon service
-    const spawnDungeonDagNodeName = await dungeonService.getSpawn();
-    if (!spawnDungeonDagNodeName) {
-      sendErrorMessage(clientId, 'Spawn location not found. Dungeon may not be initialized.', clients);
+    // Get the player to kill
+    const player = await playerService.getPlayer(client.userId);
+    if (!player) {
+      sendErrorMessage(clientId, 'Player not found', clients);
       return;
     }
 
-    // Generate username if needed for new players
-    const username = client.userName || (client.userEmail ? client.userEmail.split('@')[0] : 'Player');
+    // Kill the player: set health to 0 and isAlive to false
+    const healthUpdate = await playerService.updatePlayerHealth(client.userId, 0);
 
-    // Respawn the player (works for both existing and new players)
-    const respawnedPlayer = await playerService.respawnPlayer(
-      client.userId, 
-      spawnDungeonDagNodeName, 
-      data.characterData,
-      username,
-      client.userEmail
+    // Delete all inventory items owned by the player
+    const { getDatabase } = await import('../config/database');
+    const db = getDatabase();
+    const itemsDeleteResult = await db.collection('itemInstances').deleteMany({ 
+      owner: client.userId 
+    });
+
+    // Clear visited nodes by removing the userId from all visitedByUserIds arrays
+    const visitedNodesUpdateResult = await db.collection('dungeonDagNodes').updateMany(
+      { visitedByUserIds: client.userId },
+      { $pull: { visitedByUserIds: client.userId } }
     );
 
     // Update game state
-    console.log(`[RESPAWN DEBUG] Respawned player data:`, {
-      id: respawnedPlayer.id,
-      username: respawnedPlayer.username,
-      health: respawnedPlayer.health,
-      maxHealth: respawnedPlayer.maxHealth,
-      isAlive: respawnedPlayer.isAlive,
-      hasPosition: !!respawnedPlayer.position
-    });
-    
-    // Ensure isAlive is explicitly set to true in memory (in case database didn't update properly)
-    respawnedPlayer.isAlive = true;
-    respawnedPlayer.lastUpdate = new Date();
-    
-    gameState.players.set(respawnedPlayer.id, respawnedPlayer);
-    
-    // Verify the game state was updated correctly
-    const gameStatePlayer = gameState.players.get(respawnedPlayer.id);
-    console.log(`[RESPAWN DEBUG] Game state after respawn:`, {
-      id: gameStatePlayer?.id,
-      username: gameStatePlayer?.username,
-      isAlive: gameStatePlayer?.isAlive,
-      health: gameStatePlayer?.health,
-      maxHealth: gameStatePlayer?.maxHealth
-    });
-    
-    // Update client's playerId if it's a new player
-    if (!client.playerId) {
-      client.playerId = respawnedPlayer.id;
-    }
+    gameState.players.set(player.id, healthUpdate.player);
 
-    // Remove client from current floor and move to spawn floor
-    const oldFloor = client.currentDungeonDagNodeName;
-    if (oldFloor) {
-      // Import floor manager functions
-      const { removeClientFromFloor } = await import('./floorManager');
-      removeClientFromFloor(clientId, oldFloor, clients);
-      
-      // Notify old floor that player left
-      broadcastToFloor(oldFloor, {
-        type: 'player_left_floor',
-        data: { 
-          playerId: client.playerId,
-          fromFloor: oldFloor,
-          toFloor: spawnDungeonDagNodeName,
-          reason: 'respawn',
-        },
-      }, clients);
-    }
-    
-    // Add client to spawn floor
-    const { addClientToFloor } = await import('./floorManager');
-    addClientToFloor(clientId, spawnDungeonDagNodeName, clients);
+    console.log(`Player ${player.username} (${client.userId}) has died:`, {
+      deletedItems: itemsDeleteResult.deletedCount,
+      clearedVisitedNodes: visitedNodesUpdateResult.modifiedCount,
+      health: 0,
+      isAlive: false
+    });
 
-    // Send success response to the respawning player
+    // Get death summary
+    const deathSummary = getDeathSummary();
+
+    // Send success response with death summary
     sendMessage(clientId, {
-      type: 'respawn_success',
+      type: 'death_processed',
       data: {
-        player: {
-          id: respawnedPlayer.id,
-          username: respawnedPlayer.username,
-          health: respawnedPlayer.health,
-          maxHealth: respawnedPlayer.maxHealth,
-          isAlive: respawnedPlayer.isAlive,
-          character: respawnedPlayer.character,
-          level: respawnedPlayer.level,
-          experience: respawnedPlayer.experience,
-          position: respawnedPlayer.position,
-          currentDungeonDagNodeName: respawnedPlayer.currentDungeonDagNodeName,
-        },
-        spawnFloor: spawnDungeonDagNodeName,
-        isNewPlayer: !gameState.players.has(respawnedPlayer.id),
+        message: 'Player death processed successfully',
+        deathSummary: deathSummary,
+        deletedItems: itemsDeleteResult.deletedCount,
+        clearedVisitedNodes: visitedNodesUpdateResult.modifiedCount
       },
     }, clients);
 
-    // Broadcast respawn to other players on the spawn floor
-    broadcastToFloorExcluding(spawnDungeonDagNodeName, clientId, {
-      type: 'player_respawned',
-      data: createSafePlayerData(respawnedPlayer),
-    }, clients);
+    // Broadcast death to other players on the same floor
+    const currentFloor = client.currentDungeonDagNodeName;
+    if (currentFloor) {
+      broadcastToFloorExcluding(currentFloor, clientId, {
+        type: 'player_died',
+        data: {
+          playerId: player.id,
+          username: player.username,
+          floor: currentFloor
+        },
+      }, clients);
+    }
 
-    console.log(`Player ${respawnedPlayer.username} (${client.userId}) respawned successfully at spawn floor ${spawnDungeonDagNodeName}`);
+    console.log(`Player ${player.username} (${client.userId}) death processed successfully`);
   } catch (error) {
-    console.error('Player respawn error:', error);
-    sendErrorMessage(clientId, 'Error respawning player', clients);
+    console.error('Player death error:', error);
+    sendErrorMessage(clientId, 'Error processing player death', clients);
   }
 }
 
@@ -517,27 +484,43 @@ async function checkPlayersForSpellHit(
       
       try {
         // Update health in database
-        await playerService.updatePlayerHealth(targetClient.userId, newHealth);
+        const healthUpdate = await playerService.updatePlayerHealth(targetClient.userId, newHealth);
         console.log(`[SPELL HIT DEBUG] Updated ${targetPlayer.username} health in database: ${targetPlayer.health} -> ${newHealth}`);
         
         // Update game state
         const gameStatePlayer = gameState.players.get(targetClient.playerId);
         if (gameStatePlayer) {
           gameStatePlayer.health = newHealth;
+          gameStatePlayer.isAlive = healthUpdate.player.isAlive;
           gameStatePlayer.lastUpdate = new Date();
-          
-          // Check if player died
-          if (newHealth <= 0) {
-            gameStatePlayer.isAlive = false;
-            console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} died from spell damage!`);
-          }
         } else {
           console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} not found in gameState, updating from fresh data`);
-          targetPlayer.health = newHealth;
-          if (newHealth <= 0) {
-            targetPlayer.isAlive = false;
+          gameState.players.set(targetClient.playerId, healthUpdate.player);
+        }
+        
+        // Check if player just died and send death message
+        if (healthUpdate.isDead) {
+          console.log(`[SPELL HIT DEBUG] Player ${targetPlayer.username} died from spell damage!`);
+          const deathSummary = getDeathSummary();
+          
+          // Find the target client ID by userId
+          let targetClientId: string | null = null;
+          for (const [clientId, client] of clients.entries()) {
+            if (client.userId === targetClient.userId) {
+              targetClientId = clientId;
+              break;
+            }
           }
-          gameState.players.set(targetClient.playerId, targetPlayer);
+          
+          if (targetClientId) {
+            sendMessage(targetClientId, {
+              type: 'you-died',
+              data: {
+                deathSummary: deathSummary,
+                cause: 'spell'
+              },
+            }, clients);
+          }
         }
         
         // Send health update to the hit player
@@ -826,27 +809,32 @@ async function checkPlayersForAttackHit(
       
       try {
         // Update health in database
-        await playerService.updatePlayerHealth(targetClient.userId, newHealth);
+        const healthUpdate = await playerService.updatePlayerHealth(targetClient.userId, newHealth);
         console.log(`[ATTACK HIT DEBUG] Updated ${targetPlayer.username} health in database: ${targetPlayer.health} -> ${newHealth}`);
         
         // Update game state
         const gameStatePlayer = gameState.players.get(targetClient.playerId);
         if (gameStatePlayer) {
           gameStatePlayer.health = newHealth;
+          gameStatePlayer.isAlive = healthUpdate.player.isAlive;
           gameStatePlayer.lastUpdate = new Date();
-          
-          // Check if player died
-          if (newHealth <= 0) {
-            gameStatePlayer.isAlive = false;
-            console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} died from attack damage!`);
-          }
         } else {
           console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} not found in gameState, updating from fresh data`);
-          targetPlayer.health = newHealth;
-          if (newHealth <= 0) {
-            targetPlayer.isAlive = false;
-          }
-          gameState.players.set(targetClient.playerId, targetPlayer);
+          gameState.players.set(targetClient.playerId, healthUpdate.player);
+        }
+        
+        // Check if player just died and send death message
+        if (healthUpdate.isDead) {
+          console.log(`[ATTACK HIT DEBUG] Player ${targetPlayer.username} died from attack damage!`);
+          const deathSummary = getDeathSummary();
+          
+          sendMessage(targetClientId, {
+            type: 'you-died',
+            data: {
+              deathSummary: deathSummary,
+              cause: 'attack'
+            },
+          }, clients);
         }
         
         // Send health update to the hit player

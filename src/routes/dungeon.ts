@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { dungeonService, playerService, enemyService, itemService } from '../services';
-import { changePlayerFloor, getTotalPlayerCount, getPlayerCountsByFloor } from '../services/websocket';
+import { changePlayerFloor, getTotalPlayerCount, getPlayerCountsByFloor, clients, gameState } from '../services/websocket';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
+import { handlePlayerDeath, getDeathSummary } from '../services/gameHandlers';
 
 const router = Router();
 
@@ -272,9 +273,9 @@ router.get('/room-stairs/:floorDagNodeName', async (req: AuthenticatedRequest, r
 
 /**
  * Get spawn location (root dungeon node name)
- * GET /api/dungeon/spawn
+ * GET /api/dungeon/spawn-location
  */
-router.get('/spawn', async (req: AuthenticatedRequest, res): Promise<void> => {
+router.get('/spawn-location', async (req: AuthenticatedRequest, res): Promise<void> => {
   try {
     const spawnNodeName = await dungeonService.getSpawn();
 
@@ -986,6 +987,180 @@ router.post('/unequip-item', async (req: AuthenticatedRequest, res): Promise<voi
     res.status(500).json({
       success: false,
       error: 'Internal server error'
+    });
+  }
+});
+
+/**
+ * Kill a player (death endpoint)
+ * POST /api/dungeon/death
+ * Requires authentication
+ */
+router.post('/death', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+      return;
+    }
+
+    console.log(`[REST] Player death request for userId: ${userId}`);
+
+    // Find the client connected via WebSocket
+    let targetClientId: string | null = null;
+    for (const [clientId, client] of clients.entries()) {
+      if (client.userId === userId) {
+        targetClientId = clientId;
+        break;
+      }
+    }
+
+    if (!targetClientId) {
+      res.status(400).json({
+        success: false,
+        error: 'Player not connected via WebSocket. Please connect to the game first.'
+      });
+      return;
+    }
+
+    // Call the death handler
+    await handlePlayerDeath(
+      targetClientId,
+      {}, // No respawn data needed for death
+      clients,
+      gameState,
+      playerService,
+      dungeonService
+    );
+
+    // Get and return death summary
+    const deathSummary = getDeathSummary();
+
+    res.json({
+      success: true,
+      message: 'Player death processed successfully',
+      deathSummary: deathSummary
+    });
+
+  } catch (error) {
+    console.error('Error in death:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error while processing player death'
+    });
+  }
+});
+
+/**
+ * Spawn a player (create new or respawn existing)
+ * POST /api/dungeon/spawn
+ * Requires authentication
+ */
+router.post('/spawn', async (req: AuthenticatedRequest, res): Promise<void> => {
+  try {
+    const userId = req.user?.uid;
+    if (!userId) {
+      res.status(401).json({
+        success: false,
+        error: 'Authentication required'
+      });
+      return;
+    }
+
+    // Get character data from request body
+    const { characterData } = req.body;
+
+    if (!characterData) {
+      res.status(400).json({
+        success: false,
+        error: 'Character data is required in request body'
+      });
+      return;
+    }
+
+    console.log(`[REST] Player spawn request for userId: ${userId}`, { characterData });
+
+    // Get spawn location from dungeon service
+    const spawnDungeonDagNodeName = await dungeonService.getSpawn();
+    if (!spawnDungeonDagNodeName) {
+      res.status(500).json({
+        success: false,
+        error: 'Spawn location not found. Dungeon may not be initialized.'
+      });
+      return;
+    }
+
+    // Find the client connected via WebSocket to get username/email
+    let targetClient: any = null;
+    for (const [clientId, client] of clients.entries()) {
+      if (client.userId === userId) {
+        targetClient = client;
+        break;
+      }
+    }
+
+    // Generate username if needed for new players
+    const username = targetClient?.userName || (targetClient?.userEmail ? targetClient.userEmail.split('@')[0] : 'Player');
+    const email = targetClient?.userEmail;
+
+    // Spawn/respawn the player
+    const spawnedPlayer = await playerService.respawnPlayer(
+      userId, 
+      spawnDungeonDagNodeName, 
+      characterData,
+      username,
+      email
+    );
+
+    // Update game state if player is connected via WebSocket
+    if (targetClient) {
+      gameState.players.set(spawnedPlayer.id, spawnedPlayer);
+      
+      // Update client's playerId if it's a new player
+      if (!targetClient.playerId) {
+        targetClient.playerId = spawnedPlayer.id;
+      }
+
+      // Add client to spawn floor if they're not already there
+      const { addClientToFloor } = await import('../services/floorManager');
+      const targetClientId = [...clients.entries()].find(([_, client]) => client.userId === userId)?.[0];
+      if (targetClientId) {
+        targetClient.currentDungeonDagNodeName = spawnDungeonDagNodeName;
+        addClientToFloor(targetClientId, spawnDungeonDagNodeName, clients);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Player spawned successfully',
+      data: {
+        player: {
+          id: spawnedPlayer.id,
+          username: spawnedPlayer.username,
+          health: spawnedPlayer.health,
+          maxHealth: spawnedPlayer.maxHealth,
+          isAlive: spawnedPlayer.isAlive,
+          character: spawnedPlayer.character,
+          level: spawnedPlayer.level,
+          experience: spawnedPlayer.experience,
+          position: spawnedPlayer.position,
+          currentDungeonDagNodeName: spawnedPlayer.currentDungeonDagNodeName,
+        },
+        spawnFloor: spawnDungeonDagNodeName,
+        isNewPlayer: !gameState.players.has(spawnedPlayer.id)
+      }
+    });
+
+    console.log(`Player ${spawnedPlayer.username} (${userId}) spawned successfully at floor ${spawnDungeonDagNodeName}`);
+
+  } catch (error) {
+    console.error('Error in spawn:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal server error while spawning player'
     });
   }
 });

@@ -1,12 +1,15 @@
 import { Router, Request, Response } from 'express';
 import { PlayerService } from '../services/playerService';
+import { DungeonService } from '../services/dungeonService';
 import { AuthService } from '../services/authService';
 import { authenticateToken, AuthenticatedRequest } from '../middleware/auth';
 import { Player } from '../types/game';
+
 import { getDatabase } from '../config/database';
 
 const router = Router();
 const playerService = new PlayerService();
+const dungeonService = new DungeonService();
 const authService = new AuthService();
 
 // Add logging for all user routes
@@ -188,5 +191,7 @@ router.get('/export-data', authenticateToken, async (req: AuthenticatedRequest, 
     });
   }
 });
+
+
 
 export default router;

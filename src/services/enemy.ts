@@ -799,9 +799,15 @@ export class Enemy {
       }
 
       // Update health in database (this also updates isAlive)
+      let healthUpdate: { wasPreviouslyAlive: boolean; isDead: boolean; player: any } | null = null;
       try {
-        await this.playerService.updatePlayerHealth(player.userId, newHealth);
+        healthUpdate = await this.playerService.updatePlayerHealth(player.userId, newHealth);
         console.log(`[ENEMY ATTACK] Updated ${player.username} health in database: ${player.health} -> ${newHealth}`);
+        
+        // Update game state with new player data
+        if (gameStatePlayer && healthUpdate) {
+          gameStatePlayer.isAlive = healthUpdate.player.isAlive;
+        }
       } catch (error) {
         console.error(`[ENEMY ATTACK] Error updating player health in database:`, error);
       }
@@ -831,6 +837,24 @@ export class Enemy {
             },
             timestamp: new Date(),
           }));
+          
+          // Check if player just died and send death message
+          if (healthUpdate && healthUpdate.isDead) {
+            console.log(`[ENEMY ATTACK] Player ${player.username} died from enemy attack!`);
+            
+            // Import getDeathSummary function
+            const { getDeathSummary } = await import('./gameHandlers');
+            const deathSummary = getDeathSummary();
+            
+            client.ws.send(JSON.stringify({
+              type: 'you-died',
+              data: {
+                deathSummary: deathSummary,
+                cause: 'enemy'
+              },
+              timestamp: new Date(),
+            }));
+          }
         }
       }
 

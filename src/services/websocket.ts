@@ -6,7 +6,7 @@ import { AuthService } from './authService';
 import { PlayerService } from './playerService';
 import { DungeonService } from './dungeonService';
 import { GameMessage, WebSocketClient, GameState, Player } from '../types/game';
-import { MoveData, ActionData, RespawnData, HealthUpdateData } from './gameTypes';
+import { MoveData, ActionData, HealthUpdateData } from './gameTypes';
 import { createSafePlayerData } from './gameUtils';
 import { traceWebSocketOperation, traceWebSocketMessage, addSpanAttributes, addPayloadInfo } from '../config/tracing';
 import { 
@@ -22,7 +22,6 @@ import {
 import {
   handlePlayerMove,
   handlePlayerAction,
-  handlePlayerRespawn,
   cleanupRateLimitData,
   cleanupDbSaveData
 } from './gameHandlers';
@@ -178,10 +177,6 @@ async function handleMessage(clientId: string, message: GameMessage): Promise<vo
 
         case 'player_action':
           await handlePlayerAction(clientId, message.data as unknown as ActionData, clients, gameState, playerService, enemyService);
-          break;
-
-        case 'player_respawn':
-          await handlePlayerRespawn(clientId, message.data as unknown as RespawnData, clients, gameState, playerService, dungeonService);
           break;
 
         case 'health_update':
