@@ -352,7 +352,30 @@ export async function handlePlayerRespawn(
     );
 
     // Update game state
+    console.log(`[RESPAWN DEBUG] Respawned player data:`, {
+      id: respawnedPlayer.id,
+      username: respawnedPlayer.username,
+      health: respawnedPlayer.health,
+      maxHealth: respawnedPlayer.maxHealth,
+      isAlive: respawnedPlayer.isAlive,
+      hasPosition: !!respawnedPlayer.position
+    });
+    
+    // Ensure isAlive is explicitly set to true in memory (in case database didn't update properly)
+    respawnedPlayer.isAlive = true;
+    respawnedPlayer.lastUpdate = new Date();
+    
     gameState.players.set(respawnedPlayer.id, respawnedPlayer);
+    
+    // Verify the game state was updated correctly
+    const gameStatePlayer = gameState.players.get(respawnedPlayer.id);
+    console.log(`[RESPAWN DEBUG] Game state after respawn:`, {
+      id: gameStatePlayer?.id,
+      username: gameStatePlayer?.username,
+      isAlive: gameStatePlayer?.isAlive,
+      health: gameStatePlayer?.health,
+      maxHealth: gameStatePlayer?.maxHealth
+    });
     
     // Update client's playerId if it's a new player
     if (!client.playerId) {
@@ -545,10 +568,10 @@ async function checkPlayersForSpellHit(
           },
         }, clients);
 
-        // Broadcast player_moved to update health display for all clients
-        console.log(`[SPELL HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username}`);
+        // Broadcast player_moved to update health display for all clients except the hit player
+        console.log(`[SPELL HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username} (excluding them)`);
         const updatedPlayer = gameStatePlayer || targetPlayer;
-        broadcastToFloor(currentFloor, {
+        broadcastToFloorExcluding(currentFloor, targetClientId, {
           type: 'player_moved',
           data: {
             playerId: targetPlayer.id,
@@ -854,10 +877,10 @@ async function checkPlayersForAttackHit(
           },
         }, clients);
 
-        // Broadcast player_moved to update health display for all clients
-        console.log(`[ATTACK HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username}`);
+        // Broadcast player_moved to update health display for all clients except the hit player
+        console.log(`[ATTACK HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username} (excluding them)`);
         const updatedPlayer = gameStatePlayer || targetPlayer;
-        broadcastToFloor(currentFloor, {
+        broadcastToFloorExcluding(currentFloor, targetClientId, {
           type: 'player_moved',
           data: {
             playerId: targetPlayer.id,
