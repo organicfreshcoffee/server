@@ -40,8 +40,8 @@ export class Enemy {
   private agro_player: string | null = null; // Player ID that enemy is targeting
   private attack_destination_position: { x: number; y: number } | null = null;
   private attack_current_position: { x: number; y: number } | null = null;
-  private readonly AGRO_RADIUS = 8; // Distance within which enemy will agro to players
-  private readonly AGRO_CHECK_INTERVAL = 10; // Check for players every 10 ticks
+  private readonly AGRO_RADIUS = 30; // Distance within which enemy will agro to players
+  private readonly AGRO_CHECK_INTERVAL = 5; // Check for players every 10 ticks
   private readonly ATTACK_SPEED = 0.15; // Attack projectile speed per tick
   private readonly ATTACK_DAMAGE = 30; // Damage dealt by enemy attacks
   
