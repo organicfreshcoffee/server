@@ -1,10 +1,12 @@
+/* eslint-disable no-console */
 import { broadcastToFloor, getPlayersOnFloor } from './floorManager';
 import { clients, gameState } from './websocket';
-import { calculateDistance, createSafePlayerData } from './gameUtils';
+import { calculateDistance } from './gameUtils';
 import { getDatabase } from '../config/database';
 import { ItemService } from './itemService';
 import { PlayerService } from './playerService';
 import { MoveBroadcastData } from './gameTypes';
+import { Player } from '../types/game';
 
 export interface EnemyData {
   id: string;
@@ -589,7 +591,7 @@ export class Enemy {
         return;
       }
 
-      let closestPlayer: any = null;
+      let closestPlayer: Partial<Player> | null = null;
       let closestDistance = Infinity;
 
       // Find the closest player within agro radius
@@ -617,7 +619,7 @@ export class Enemy {
       }
 
       // Set agro target to closest player, or null if none in range
-      this.agro_player = closestPlayer ? closestPlayer.id : null;
+      this.agro_player = closestPlayer?.id || null;
     } catch (error) {
       console.error(`[ENEMY AGRO] Error checking for players to agro:`, error);
     }
@@ -667,15 +669,15 @@ export class Enemy {
   /**
    * Initialize a new attack towards the agro'd player
    */
-  private initializeAttack(targetPlayer: any): void {
+  private initializeAttack(targetPlayer: Partial<Player>): void {
     this.attack_current_position = {
       x: this.enemyData.positionX,
       y: this.enemyData.positionY
     };
     
     this.attack_destination_position = {
-      x: targetPlayer.position.x,
-      y: targetPlayer.position.z // Convert 3D z to 2D y
+      x: targetPlayer.position?.x || 0,
+      y: targetPlayer.position?.z || 0 // Convert 3D z to 2D y
     };
 
     console.log(`[ENEMY ATTACK] Enemy ${this.enemyData.id} initialized attack from (${this.attack_current_position.x}, ${this.attack_current_position.y}) to (${this.attack_destination_position.x}, ${this.attack_destination_position.y})`);
@@ -763,8 +765,14 @@ export class Enemy {
   /**
    * Apply damage to a player hit by enemy attack
    */
-  private async damagePlayer(player: any): Promise<void> {
+  private async damagePlayer(player: Partial<Player>): Promise<void> {
     try {
+      // Ensure required properties are available
+      if (!player.id || !player.userId || player.health === undefined) {
+        console.error(`[ENEMY ATTACK] Player missing required properties for damage:`, player);
+        return;
+      }
+
       const newHealth = Math.max(0, player.health - this.ATTACK_DAMAGE);
       
       // Update player health in game state
