@@ -568,10 +568,10 @@ async function checkPlayersForSpellHit(
           },
         }, clients);
 
-        // Broadcast player_moved to update health display for all clients
-        console.log(`[SPELL HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username}`);
+        // Broadcast player_moved to update health display for all clients except the hit player
+        console.log(`[SPELL HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username} (excluding them)`);
         const updatedPlayer = gameStatePlayer || targetPlayer;
-        broadcastToFloor(currentFloor, {
+        broadcastToFloorExcluding(currentFloor, targetClientId, {
           type: 'player_moved',
           data: {
             playerId: targetPlayer.id,
@@ -877,10 +877,10 @@ async function checkPlayersForAttackHit(
           },
         }, clients);
 
-        // Broadcast player_moved to update health display for all clients
-        console.log(`[ATTACK HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username}`);
+        // Broadcast player_moved to update health display for all clients except the hit player
+        console.log(`[ATTACK HIT DEBUG] Broadcasting player_moved to update health display for ${targetPlayer.username} (excluding them)`);
         const updatedPlayer = gameStatePlayer || targetPlayer;
-        broadcastToFloor(currentFloor, {
+        broadcastToFloorExcluding(currentFloor, targetClientId, {
           type: 'player_moved',
           data: {
             playerId: targetPlayer.id,

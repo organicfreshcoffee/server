@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import { broadcastToFloor, getPlayersOnFloor } from './floorManager';
+import { broadcastToFloor, broadcastToFloorExcluding, getPlayersOnFloor } from './floorManager';
 import { clients, gameState } from './websocket';
 import { calculateDistance } from './gameUtils';
 import { getDatabase } from '../config/database';
@@ -847,18 +847,20 @@ export class Enemy {
         },
       }, clients);
 
-      // Broadcast player_moved to update health display for all clients
-      broadcastToFloor(this.enemyData.floorName, {
-        type: 'player_moved',
-        data: {
-          playerId: player.id,
-          position: player.position,
-          character: player.character || { type: 'unknown' },
-          health: newHealth,
-          rotation: player.rotation,
-          timestamp: new Date(),
-        } as MoveBroadcastData,
-      }, clients);
+      // Broadcast player_moved to update health display for all clients except the hit player
+      if (targetClientId) {
+        broadcastToFloorExcluding(this.enemyData.floorName, targetClientId, {
+          type: 'player_moved',
+          data: {
+            playerId: player.id,
+            position: player.position,
+            character: player.character || { type: 'unknown' },
+            health: newHealth,
+            rotation: player.rotation,
+            timestamp: new Date(),
+          } as MoveBroadcastData,
+        }, clients);
+      }
 
       console.log(`[ENEMY ATTACK] Player ${player.username} took ${this.ATTACK_DAMAGE} damage from enemy ${this.enemyData.id}, health: ${newHealth}/${player.maxHealth || 100}`);
     } catch (error) {
