@@ -161,6 +161,24 @@ export async function handlePlayerMove(
         gamePlayer.character = character;
       }
       gamePlayer.lastUpdate = new Date();
+      
+      // Check if isAlive is undefined and query database if needed
+      if (gamePlayer.isAlive === undefined) {
+        console.log(`[MOVE DEBUG] Player ${client.playerId} has undefined isAlive, querying database...`);
+        try {
+          const dbPlayer = await playerService.getPlayer(client.userId);
+          if (dbPlayer) {
+            gamePlayer.isAlive = dbPlayer.isAlive !== undefined ? dbPlayer.isAlive : true;
+            console.log(`[MOVE DEBUG] Updated player ${client.playerId} isAlive from database: ${gamePlayer.isAlive}`);
+          } else {
+            console.warn(`[MOVE DEBUG] Could not find player ${client.userId} in database, defaulting isAlive to true`);
+            gamePlayer.isAlive = true;
+          }
+        } catch (error) {
+          console.error(`[MOVE DEBUG] Error querying database for player ${client.userId} isAlive status:`, error);
+          gamePlayer.isAlive = true; // Default to alive on error
+        }
+      }
     }
 
     // Only save to database every 2 seconds to reduce DB load

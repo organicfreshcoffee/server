@@ -1,8 +1,9 @@
-import { broadcastToFloor } from './floorManager';
-import { clients } from './websocket';
-import { calculateDistance } from './gameUtils';
+import { broadcastToFloor, getPlayersOnFloor } from './floorManager';
+import { clients, gameState } from './websocket';
+import { calculateDistance, createSafePlayerData } from './gameUtils';
 import { getDatabase } from '../config/database';
 import { ItemService } from './itemService';
+import { MoveBroadcastData } from './gameTypes';
 
 export interface EnemyData {
   id: string;
@@ -31,6 +32,15 @@ export class Enemy {
   private destinationY: number | null = null;
   private isMovingToDestination = false;
   private tickCounter = 0;
+  
+  // Attack system properties
+  private agro_player: string | null = null; // Player ID that enemy is targeting
+  private attack_destination_position: { x: number; y: number } | null = null;
+  private attack_current_position: { x: number; y: number } | null = null;
+  private readonly AGRO_RADIUS = 8; // Distance within which enemy will agro to players
+  private readonly AGRO_CHECK_INTERVAL = 10; // Check for players every 10 ticks
+  private readonly ATTACK_SPEED = 0.15; // Attack projectile speed per tick
+  private readonly ATTACK_DAMAGE = 30; // Damage dealt by enemy attacks
   
   constructor(
     private enemyData: EnemyData, 
@@ -65,6 +75,8 @@ export class Enemy {
    */
   private tick(): void {
     try {
+      this.tickCounter++;
+      
       // Check if it's time to despawn
       const elapsedTime = Date.now() - this.startTime;
       
@@ -76,6 +88,17 @@ export class Enemy {
       // Don't process if already despawned
       if (this.isDespawned) {
         return;
+      }
+
+      // Check for players to agro every 10 ticks
+      if (this.tickCounter % this.AGRO_CHECK_INTERVAL === 0) {
+        console.log(`[ENEMY AGRO DEBUG] Tick ${this.tickCounter}: Running agro check for enemy ${this.enemyData.id}`);
+        this.checkForPlayersToAgro();
+      }
+
+      // Handle attack logic if agro'd to a player
+      if (this.agro_player) {
+        this.handleAttack();
       }
 
       // Perform movement and broadcast
@@ -92,8 +115,6 @@ export class Enemy {
    */
   private async move(): Promise<void> {
     try {
-      this.tickCounter++;
-
       // Convert current position to tile coordinates
       const currentTileX = Math.round(this.enemyData.positionX / this.CUBE_SIZE);
       const currentTileY = Math.round(this.enemyData.positionY / this.CUBE_SIZE);
@@ -534,6 +555,11 @@ export class Enemy {
     } catch (error) {
       console.error(`Error despawning enemy ${this.enemyData.id}:`, error);
     } finally {
+      // Clean up attack state
+      this.agro_player = null;
+      this.attack_current_position = null;
+      this.attack_destination_position = null;
+      
       // Clean up the ticker
       if (this.ticker) {
         clearInterval(this.ticker);
@@ -546,6 +572,311 @@ export class Enemy {
         this.onDespawnCallback(this.enemyData.id);
       }
     }
+  }
+
+  /**
+   * Check for players within agro radius and set agro target
+   */
+  private checkForPlayersToAgro(): void {
+    try {
+      // Get all players on this floor
+      const playersOnFloor = getPlayersOnFloor(this.enemyData.floorName, clients, gameState);
+      
+      console.log(`[ENEMY AGRO DEBUG] Enemy ${this.enemyData.id} checking agro: found ${playersOnFloor.length} players on floor ${this.enemyData.floorName}`);
+      
+      if (playersOnFloor.length === 0) {
+        this.agro_player = null;
+        return;
+      }
+
+      let closestPlayer: any = null;
+      let closestDistance = Infinity;
+
+      // Find the closest player within agro radius
+      for (const player of playersOnFloor) {
+        console.log(`[ENEMY AGRO DEBUG] Checking player:`, {
+          id: player.id,
+          username: player.username,
+          hasPosition: !!player.position,
+          position: player.position,
+          isAlive: player.isAlive
+        });
+
+        if (!player.position || !player.isAlive) {
+          console.log(`[ENEMY AGRO DEBUG] Skipping player ${player.username}: no position or not alive`);
+          continue;
+        }
+
+        // Calculate distance to player (convert enemy 2D position to match player 3D)
+        const enemyPos3D = {
+          x: this.enemyData.positionX,
+          y: 6, // Default y coordinate
+          z: this.enemyData.positionY
+        };
+
+        const distance = calculateDistance(player.position, enemyPos3D);
+        console.log(`[ENEMY AGRO DEBUG] Player ${player.username} distance: ${distance.toFixed(2)}, agro radius: ${this.AGRO_RADIUS}`);
+
+        // Check if player is within agro radius
+        if (distance <= this.AGRO_RADIUS && distance < closestDistance) {
+          console.log(`[ENEMY AGRO DEBUG] Player ${player.username} is within agro range!`);
+          closestPlayer = player;
+          closestDistance = distance;
+        } else {
+          console.log(`[ENEMY AGRO DEBUG] Player ${player.username} not within agro: distance ${distance.toFixed(2)} > radius ${this.AGRO_RADIUS} or not closest`);
+        }
+      }
+
+      // Set agro target to closest player, or null if none in range
+      this.agro_player = closestPlayer ? closestPlayer.id : null;
+
+      if (this.agro_player) {
+        console.log(`[ENEMY AGRO] Enemy ${this.enemyData.id} agro'd to player ${this.agro_player} at distance ${closestDistance.toFixed(2)}`);
+      } else {
+        console.log(`[ENEMY AGRO] Enemy ${this.enemyData.id} found no players to agro: closest distance was ${closestDistance === Infinity ? 'N/A' : closestDistance.toFixed(2)}`);
+      }
+    } catch (error) {
+      console.error(`[ENEMY AGRO] Error checking for players to agro:`, error);
+    }
+  }
+
+  /**
+   * Handle attack logic when agro'd to a player
+   */
+  private handleAttack(): void {
+    try {
+      // Get the agro'd player
+      const targetPlayer = gameState.players.get(this.agro_player!);
+      if (!targetPlayer || !targetPlayer.isAlive) {
+        // Target player no longer exists or is dead, clear agro
+        this.agro_player = null;
+        this.attack_current_position = null;
+        this.attack_destination_position = null;
+        return;
+      }
+
+      // If no current attack, initialize one
+      if (!this.attack_current_position || !this.attack_destination_position) {
+        this.initializeAttack(targetPlayer);
+        return;
+      }
+
+      // Move attack towards destination
+      this.moveAttack();
+
+      // Check if attack reached destination or hit any player
+      const reachedDestination = this.hasAttackReachedDestination();
+      const hitPlayer = this.checkAttackPlayerCollision();
+
+      if (reachedDestination || hitPlayer) {
+        // Reset attack for next iteration
+        this.initializeAttack(targetPlayer);
+      }
+
+      // Broadcast attack position to all players on floor
+      this.broadcastAttackPosition();
+
+    } catch (error) {
+      console.error(`[ENEMY ATTACK] Error handling attack:`, error);
+    }
+  }
+
+  /**
+   * Initialize a new attack towards the agro'd player
+   */
+  private initializeAttack(targetPlayer: any): void {
+    this.attack_current_position = {
+      x: this.enemyData.positionX,
+      y: this.enemyData.positionY
+    };
+    
+    this.attack_destination_position = {
+      x: targetPlayer.position.x,
+      y: targetPlayer.position.z // Convert 3D z to 2D y
+    };
+
+    console.log(`[ENEMY ATTACK] Enemy ${this.enemyData.id} initialized attack from (${this.attack_current_position.x}, ${this.attack_current_position.y}) to (${this.attack_destination_position.x}, ${this.attack_destination_position.y})`);
+  }
+
+  /**
+   * Move the attack projectile towards its destination
+   */
+  private moveAttack(): void {
+    if (!this.attack_current_position || !this.attack_destination_position) {
+      return;
+    }
+
+    const deltaX = this.attack_destination_position.x - this.attack_current_position.x;
+    const deltaY = this.attack_destination_position.y - this.attack_current_position.y;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+    if (distance > this.ATTACK_SPEED) {
+      // Move towards destination
+      const normalizedX = deltaX / distance;
+      const normalizedY = deltaY / distance;
+      
+      this.attack_current_position.x += normalizedX * this.ATTACK_SPEED;
+      this.attack_current_position.y += normalizedY * this.ATTACK_SPEED;
+    }
+  }
+
+  /**
+   * Check if attack has reached its destination
+   */
+  private hasAttackReachedDestination(): boolean {
+    if (!this.attack_current_position || !this.attack_destination_position) {
+      return false;
+    }
+
+    const deltaX = this.attack_destination_position.x - this.attack_current_position.x;
+    const deltaY = this.attack_destination_position.y - this.attack_current_position.y;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+    return distance <= this.ATTACK_SPEED;
+  }
+
+  /**
+   * Check if attack projectile has hit any player and apply damage
+   */
+  private checkAttackPlayerCollision(): boolean {
+    if (!this.attack_current_position) {
+      return false;
+    }
+
+    try {
+      // Get all players on this floor
+      const playersOnFloor = getPlayersOnFloor(this.enemyData.floorName, clients, gameState);
+      
+      for (const player of playersOnFloor) {
+        if (!player.position || !player.isAlive || !player.id) {
+          continue;
+        }
+
+        // Convert attack position to 3D for distance calculation
+        const attackPos3D = {
+          x: this.attack_current_position.x,
+          y: 6, // Default y coordinate  
+          z: this.attack_current_position.y
+        };
+
+        const distance = calculateDistance(player.position, attackPos3D);
+        const hitRadius = 1.5; // Hit detection radius
+
+        if (distance <= hitRadius) {
+          console.log(`[ENEMY ATTACK] Attack from enemy ${this.enemyData.id} hit player ${player.username} at distance ${distance.toFixed(2)}`);
+          
+          // Apply damage to player
+          this.damagePlayer(player);
+          return true; // Attack hit, should reset
+        }
+      }
+    } catch (error) {
+      console.error(`[ENEMY ATTACK] Error checking attack collision:`, error);
+    }
+
+    return false;
+  }
+
+  /**
+   * Apply damage to a player hit by enemy attack
+   */
+  private async damagePlayer(player: any): Promise<void> {
+    try {
+      const newHealth = Math.max(0, player.health - this.ATTACK_DAMAGE);
+      
+      // Update player health in game state
+      const gameStatePlayer = gameState.players.get(player.id);
+      if (gameStatePlayer) {
+        gameStatePlayer.health = newHealth;
+        gameStatePlayer.lastUpdate = new Date();
+        
+        if (newHealth <= 0) {
+          gameStatePlayer.isAlive = false;
+          console.log(`[ENEMY ATTACK] Player ${player.username} killed by enemy ${this.enemyData.id}!`);
+        }
+      }
+
+      // Find the client for this player and send health update
+      let targetClientId: string | null = null;
+      for (const [clientId, client] of clients.entries()) {
+        if (client.playerId === player.id) {
+          targetClientId = clientId;
+          break;
+        }
+      }
+
+      // Send health update to the hit player
+      if (targetClientId) {
+        const client = clients.get(targetClientId);
+        if (client && client.ws.readyState === 1) { // WebSocket.OPEN
+          client.ws.send(JSON.stringify({
+            type: 'health_update',
+            data: {
+              health: newHealth,
+              maxHealth: player.maxHealth || 100,
+              damage: this.ATTACK_DAMAGE,
+              damageCause: 'enemy_attack',
+              enemyId: this.enemyData.id,
+              isAlive: newHealth > 0,
+            },
+            timestamp: new Date(),
+          }));
+        }
+      }
+
+      // Broadcast player hit to all players on floor
+      broadcastToFloor(this.enemyData.floorName, {
+        type: 'player_hit',
+        data: {
+          targetPlayerId: player.id,
+          enemyId: this.enemyData.id,
+          damage: this.ATTACK_DAMAGE,
+          newHealth: newHealth,
+          isAlive: newHealth > 0,
+          hitType: 'enemy_attack',
+        },
+      }, clients);
+
+      // Broadcast player_moved to update health display for all clients
+      broadcastToFloor(this.enemyData.floorName, {
+        type: 'player_moved',
+        data: {
+          playerId: player.id,
+          position: player.position,
+          character: player.character || { type: 'unknown' },
+          health: newHealth,
+          rotation: player.rotation,
+          timestamp: new Date(),
+        } as MoveBroadcastData,
+      }, clients);
+
+      console.log(`[ENEMY ATTACK] Player ${player.username} took ${this.ATTACK_DAMAGE} damage from enemy ${this.enemyData.id}, health: ${newHealth}/${player.maxHealth || 100}`);
+    } catch (error) {
+      console.error(`[ENEMY ATTACK] Error applying damage to player:`, error);
+    }
+  }
+
+  /**
+   * Broadcast current attack position to all players on floor
+   */
+  private broadcastAttackPosition(): void {
+    if (!this.attack_current_position) {
+      return;
+    }
+
+    broadcastToFloor(this.enemyData.floorName, {
+      type: 'enemy_attack',
+      data: {
+        enemyId: this.enemyData.id,
+        enemyTypeName: this.enemyData.enemyTypeName,
+        attackPosition: {
+          x: this.attack_current_position.x,
+          y: 6, // Convert to 3D y coordinate
+          z: this.attack_current_position.y // Convert 2D y to 3D z
+        },
+        targetPlayerId: this.agro_player,
+      },
+    }, clients);
   }
 
   /**
