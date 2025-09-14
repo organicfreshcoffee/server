@@ -23,7 +23,8 @@ import {
   handlePlayerMove,
   handlePlayerAction,
   handlePlayerRespawn,
-  cleanupRateLimitData
+  cleanupRateLimitData,
+  cleanupDbSaveData
 } from './gameHandlers';
 import { enemyService } from './index';
 
@@ -372,6 +373,23 @@ async function handleDisconnect(clientId: string): Promise<void> {
     // Set player offline if authenticated
     if (client.userId) {
       try {
+        // Force save player data to database on disconnect
+        if (client.playerId) {
+          const player = gameState.players.get(client.playerId);
+          if (player) {
+            await playerService.updatePlayerPositionRotationAndCharacter(
+              client.userId, 
+              player.position, 
+              player.rotation, 
+              player.character
+            );
+            console.log(`Forced save of player data for ${client.userId} on disconnect`);
+          }
+        }
+        
+        // Clean up database save tracking data
+        cleanupDbSaveData(client.userId);
+        
         await playerService.setPlayerOnlineStatus(client.userId, false);
         
         // Remove from game state
