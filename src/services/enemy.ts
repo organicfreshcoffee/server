@@ -583,9 +583,7 @@ export class Enemy {
     try {
       // Get all players on this floor
       const playersOnFloor = getPlayersOnFloor(this.enemyData.floorName, clients, gameState);
-      
-      console.log(`[ENEMY AGRO DEBUG] Enemy ${this.enemyData.id} checking agro: found ${playersOnFloor.length} players on floor ${this.enemyData.floorName}`);
-      
+
       if (playersOnFloor.length === 0) {
         this.agro_player = null;
         return;
@@ -596,14 +594,6 @@ export class Enemy {
 
       // Find the closest player within agro radius
       for (const player of playersOnFloor) {
-        console.log(`[ENEMY AGRO DEBUG] Checking player:`, {
-          id: player.id,
-          username: player.username,
-          hasPosition: !!player.position,
-          position: player.position,
-          isAlive: player.isAlive
-        });
-
         if (!player.position || !player.isAlive) {
           console.log(`[ENEMY AGRO DEBUG] Skipping player ${player.username}: no position or not alive`);
           continue;
@@ -617,26 +607,17 @@ export class Enemy {
         };
 
         const distance = calculateDistance(player.position, enemyPos3D);
-        console.log(`[ENEMY AGRO DEBUG] Player ${player.username} distance: ${distance.toFixed(2)}, agro radius: ${this.AGRO_RADIUS}`);
 
         // Check if player is within agro radius
         if (distance <= this.AGRO_RADIUS && distance < closestDistance) {
           console.log(`[ENEMY AGRO DEBUG] Player ${player.username} is within agro range!`);
           closestPlayer = player;
           closestDistance = distance;
-        } else {
-          console.log(`[ENEMY AGRO DEBUG] Player ${player.username} not within agro: distance ${distance.toFixed(2)} > radius ${this.AGRO_RADIUS} or not closest`);
         }
       }
 
       // Set agro target to closest player, or null if none in range
       this.agro_player = closestPlayer ? closestPlayer.id : null;
-
-      if (this.agro_player) {
-        console.log(`[ENEMY AGRO] Enemy ${this.enemyData.id} agro'd to player ${this.agro_player} at distance ${closestDistance.toFixed(2)}`);
-      } else {
-        console.log(`[ENEMY AGRO] Enemy ${this.enemyData.id} found no players to agro: closest distance was ${closestDistance === Infinity ? 'N/A' : closestDistance.toFixed(2)}`);
-      }
     } catch (error) {
       console.error(`[ENEMY AGRO] Error checking for players to agro:`, error);
     }
